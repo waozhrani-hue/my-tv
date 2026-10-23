@@ -248,7 +248,11 @@ class Settings {
     this.liveView = ViewMode.list,
     this.movieView = ViewMode.grid,
     this.resumePlayback = true,
+    this.skipSeconds = 10,
   });
+
+  /// Offered in the settings screen for the double-tap skip.
+  static const skipChoices = [5, 10, 15, 30];
 
   /// Many providers key off a known player agent; this is the common default.
   static const defaultUserAgent =
@@ -268,6 +272,11 @@ class Settings {
   /// Whether a film reopens where it was left off.
   final bool resumePlayback;
 
+  /// How far one double-tap, or one arrow-key press, moves the playhead.
+  final int skipSeconds;
+
+  Duration get skip => Duration(seconds: skipSeconds);
+
   ViewMode viewFor(MediaKind kind) =>
       kind == MediaKind.live ? liveView : movieView;
 
@@ -281,6 +290,7 @@ class Settings {
     ViewMode? liveView,
     ViewMode? movieView,
     bool? resumePlayback,
+    int? skipSeconds,
   }) {
     return Settings(
       liveContainer: liveContainer ?? this.liveContainer,
@@ -292,6 +302,7 @@ class Settings {
       liveView: liveView ?? this.liveView,
       movieView: movieView ?? this.movieView,
       resumePlayback: resumePlayback ?? this.resumePlayback,
+      skipSeconds: skipSeconds ?? this.skipSeconds,
     );
   }
 
@@ -305,6 +316,7 @@ class Settings {
     'liveView': liveView.name,
     'movieView': movieView.name,
     'resumePlayback': resumePlayback,
+    'skipSeconds': skipSeconds,
   };
 
   static Settings fromJson(Map<String, dynamic> json) {
@@ -325,6 +337,7 @@ class Settings {
       liveView: view('liveView', ViewMode.list),
       movieView: view('movieView', ViewMode.grid),
       resumePlayback: json['resumePlayback'] as bool? ?? true,
+      skipSeconds: (json['skipSeconds'] as num?)?.toInt() ?? 10,
     );
   }
 }

@@ -26,7 +26,11 @@ class PlayerPage extends StatefulWidget {
 
 class _PlayerPageState extends State<PlayerPage> {
   static const _hideDelay = Duration(milliseconds: 3500);
-  static const _seekStep = Duration(seconds: 10);
+
+  /// How long the skip indicator stays up. Another double-tap inside this
+  /// window adds to the same burst instead of starting a new one, which is
+  /// what makes repeated taps feel like one continuous scrub.
+  static const _burstWindow = Duration(milliseconds: 900);
 
   late final Player _player;
   late final VideoController _controller;
@@ -41,6 +45,14 @@ class _PlayerPageState extends State<PlayerPage> {
   /// Set when a film has a saved position; applied once the duration is known,
   /// because seeking before that is ignored.
   Duration? _pendingResume;
+
+  // Double-tap skip, YouTube style: the running total for the current burst,
+  // which side it is on, and whether the indicator is showing.
+  Timer? _burstTimer;
+  var _burstSeconds = 0;
+  var _burstForward = true;
+  var _burstVisible = false;
+  Offset? _lastTapPosition;
 
   var _controlsVisible = true;
   var _playing = false;
@@ -206,6 +218,7 @@ class _PlayerPageState extends State<PlayerPage> {
   void dispose() {
     _hideTimer?.cancel();
     _progressTimer?.cancel();
+    _burstTimer?.cancel();
     // Capture the final position before the player is torn down.
     if (_item.kind == MediaKind.movie && _duration > Duration.zero) {
       _app.saveProgress(_item, _position, _duration);
@@ -248,12 +261,49 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   void _seekBy(Duration delta) {
-    if (_isLive || _duration == Duration.zero) return;
+    // Works wherever mpv reports a duration, which covers films and any live
+    // stream with a DVR window. A plain live feed reports none, so this is a
+    // no-op there without a separate check.
+    if (_duration <= Duration.zero) return;
     var target = _position + delta;
     if (target < Duration.zero) target = Duration.zero;
     if (target > _duration) target = _duration;
     _player.seek(target);
     _poke();
+  }
+
+  /// Decides what a double-tap means from where it landed: the outer thirds
+  /// skip, the middle third plays or pauses.
+  void _handleDoubleTap(double width) {
+    final x = _lastTapPosition?.dx;
+    final zone = width / 3;
+    if (x == null || (x >= zone && x <= width - zone)) {
+      _togglePlay();
+      return;
+    }
+    _skip(forward: x > zone);
+  }
+
+  /// One skip step, accumulating into the visible burst when taps come in
+  /// quick succession.
+  void _skip({required bool forward}) {
+    _poke();
+    if (_duration <= Duration.zero) return;
+
+    final step = _app.settings.skipSeconds;
+    setState(() {
+      // A tap on the other side starts a fresh count rather than subtracting.
+      if (!_burstVisible || forward != _burstForward) _burstSeconds = 0;
+      _burstForward = forward;
+      _burstSeconds += step;
+      _burstVisible = true;
+    });
+    _seekBy(Duration(seconds: forward ? step : -step));
+
+    _burstTimer?.cancel();
+    _burstTimer = Timer(_burstWindow, () {
+      if (mounted) setState(() => _burstVisible = false);
+    });
   }
 
   void _setVolume(double value) {
@@ -340,9 +390,9 @@ class _PlayerPageState extends State<PlayerPage> {
       case LogicalKeyboardKey.mediaPlayPause:
         _togglePlay();
       case LogicalKeyboardKey.arrowRight:
-        _seekBy(_seekStep);
+        _skip(forward: true);
       case LogicalKeyboardKey.arrowLeft:
-        _seekBy(-_seekStep);
+        _skip(forward: false);
       case LogicalKeyboardKey.arrowUp:
         _setVolume(_volume + 5);
       case LogicalKeyboardKey.arrowDown:
@@ -390,21 +440,36 @@ class _PlayerPageState extends State<PlayerPage> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                GestureDetector(
-                  onTap: _toggleControls,
-                  onDoubleTap: _togglePlay,
-                  behavior: HitTestBehavior.opaque,
-                  child: ColoredBox(
-                    color: Colors.black,
-                    child: Video(
-                      controller: _controller,
-                      controls: NoVideoControls,
-                      fit: BoxFit.contain,
+                LayoutBuilder(
+                  builder: (context, constraints) => GestureDetector(
+                    onTap: _toggleControls,
+                    onDoubleTapDown: (d) => _lastTapPosition = d.localPosition,
+                    onDoubleTap: () => _handleDoubleTap(constraints.maxWidth),
+                    behavior: HitTestBehavior.opaque,
+                    child: ColoredBox(
+                      color: Colors.black,
+                      child: Video(
+                        controller: _controller,
+                        controls: NoVideoControls,
+                        fit: BoxFit.contain,
+                      ),
                     ),
                   ),
                 ),
                 if (_error != null) _errorLayer(),
                 if (_error == null && _buffering) const _BufferingLayer(),
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: AnimatedOpacity(
+                      opacity: _burstVisible ? 1 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      child: _SkipBurst(
+                        forward: _burstForward,
+                        seconds: _burstSeconds,
+                      ),
+                    ),
+                  ),
+                ),
                 AnimatedOpacity(
                   opacity: _controlsVisible ? 1 : 0,
                   duration: const Duration(milliseconds: 180),
@@ -505,6 +570,57 @@ String formatClock(Duration d) {
 }
 
 // --- Overlay pieces ----------------------------------------------------------
+
+/// The skip indicator: a dimmed rounded panel over the half that was tapped,
+/// showing the running total for the current burst.
+class _SkipBurst extends StatelessWidget {
+  const _SkipBurst({required this.forward, required this.seconds});
+
+  final bool forward;
+  final int seconds;
+
+  @override
+  Widget build(BuildContext context) {
+    const corner = Radius.circular(280);
+    return Align(
+      alignment: forward ? Alignment.centerRight : Alignment.centerLeft,
+      child: FractionallySizedBox(
+        widthFactor: 0.38,
+        heightFactor: 1,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.32),
+            borderRadius: BorderRadius.horizontal(
+              left: forward ? corner : Radius.zero,
+              right: forward ? Radius.zero : corner,
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                forward
+                    ? Icons.fast_forward_rounded
+                    : Icons.fast_rewind_rounded,
+                size: 44,
+                color: Colors.white,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '$seconds seconds',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _BufferingLayer extends StatelessWidget {
   const _BufferingLayer();
@@ -729,7 +845,9 @@ class _BottomBar extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!isLive && duration > Duration.zero)
+          // Shown whenever there is something to scrub through, which
+          // includes a live stream with a DVR window.
+          if (duration > Duration.zero)
             Row(
               children: [
                 const SizedBox(width: 8),
@@ -789,7 +907,7 @@ class _BottomBar extends StatelessWidget {
                   ),
                 ),
               const Spacer(),
-              if (isLive)
+              if (isLive && duration <= Duration.zero)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Text(formatClock(position), style: _timeStyle),

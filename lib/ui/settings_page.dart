@@ -5,6 +5,7 @@ import '../app_info.dart';
 import '../data/models.dart';
 import '../state/app_state.dart';
 import 'add_source_page.dart';
+import 'widgets/update_card.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -71,6 +72,28 @@ class SettingsPage extends StatelessWidget {
                     ),
                   ),
                   const Divider(),
+                  ListTile(
+                    title: const Text('Skip step'),
+                    subtitle: const Text(
+                      'How far a double-tap on the left or right of the video '
+                      'moves, and how far the arrow keys move.',
+                      style: _subtitleStyle,
+                    ),
+                    trailing: DropdownButton<int>(
+                      value: settings.skipSeconds,
+                      underline: const SizedBox.shrink(),
+                      items: [
+                        for (final s in Settings.skipChoices)
+                          DropdownMenuItem(value: s, child: Text('$s s')),
+                      ],
+                      onChanged: (v) => v == null
+                          ? null
+                          : state.updateSettings(
+                              settings.copyWith(skipSeconds: v),
+                            ),
+                    ),
+                  ),
+                  const Divider(),
                   SwitchListTile(
                     value: settings.hardwareDecoding,
                     onChanged: (v) => state.updateSettings(
@@ -108,6 +131,10 @@ class SettingsPage extends StatelessWidget {
                   ),
                 ],
               ),
+
+              const SizedBox(height: 28),
+              _SectionTitle('Updates'),
+              const UpdateCard(),
 
               const SizedBox(height: 28),
               _SectionTitle('About'),

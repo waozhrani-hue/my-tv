@@ -113,6 +113,30 @@ void main() {
       expect(restored.liveView, ViewMode.list);
       expect(restored.movieView, ViewMode.grid);
       expect(restored.resumePlayback, isTrue);
+      expect(restored.skipSeconds, 10);
+    });
+  });
+
+  group('skip step', () {
+    test('defaults to ten seconds', () {
+      expect(const Settings().skipSeconds, 10);
+      expect(const Settings().skip, const Duration(seconds: 10));
+    });
+
+    test('survives a JSON round trip', () {
+      final restored = Settings.fromJson(
+        jsonDecode(jsonEncode(const Settings(skipSeconds: 30).toJson()))
+            as Map<String, dynamic>,
+      );
+      expect(restored.skipSeconds, 30);
+      expect(restored.skip, const Duration(seconds: 30));
+    });
+
+    test('every offered choice is a positive number of seconds', () {
+      expect(Settings.skipChoices, isNotEmpty);
+      expect(Settings.skipChoices.every((s) => s > 0), isTrue);
+      // The default must be selectable, or the dropdown throws.
+      expect(Settings.skipChoices, contains(const Settings().skipSeconds));
     });
   });
 }

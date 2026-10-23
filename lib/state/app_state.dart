@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../data/local_store.dart';
 import '../data/models.dart';
 import '../data/repository.dart';
+import '../data/update_service.dart';
 
 enum LoadStatus { idle, loading, ready, error }
 
@@ -10,10 +13,12 @@ enum LoadStatus { idle, loading, ready, error }
 /// catalog of whichever one is selected, and the user's favourites, history
 /// and settings.
 class AppState extends ChangeNotifier {
-  AppState(this._store, this._repository);
+  AppState(this._store, this._repository, {UpdateService? updates})
+    : _updates = updates ?? UpdateService();
 
   final LocalStore _store;
   final Repository _repository;
+  final UpdateService _updates;
 
   /// Most recent items kept in history.
   static const _recentLimit = 40;
@@ -53,6 +58,9 @@ class AppState extends ChangeNotifier {
     _progress = await _store.readProgress();
     _settings = await _store.readSettings();
     _booted = true;
+
+    // Not awaited: an update check must never hold up the first screen.
+    unawaited(checkForUpdate());
 
     final wanted = _settings.lastSourceId;
     final start = _sources.firstWhereOrNull((s) => s.id == wanted) ??
@@ -252,6 +260,32 @@ class AppState extends ChangeNotifier {
     _settings = next;
     notifyListeners();
     await _store.writeSettings(next);
+  }
+
+  // --- Updates -------------------------------------------------------------
+
+  AppRelease? _update;
+  var _updateChecked = false;
+
+  UpdateService get updates => _updates;
+
+  /// The newest published release when it is ahead of this build.
+  AppRelease? get availableUpdate => _update;
+  bool get updateChecked => _updateChecked;
+
+  /// Asks GitHub whether there is a newer build. Startup calls this without
+  /// awaiting it, so a slow or absent network never delays the UI.
+  Future<AppRelease?> checkForUpdate() async {
+    try {
+      _update = await _updates.check();
+    } on UpdateException {
+      _update = null;
+    } catch (_) {
+      _update = null;
+    }
+    _updateChecked = true;
+    notifyListeners();
+    return _update;
   }
 
   /// Checks Xtream credentials from the add/edit form, before anything is

@@ -232,6 +232,16 @@ class _BrowsePageState extends State<BrowsePage> {
             ),
           ),
           const SizedBox(width: 4),
+          if (state.availableUpdate case final update?)
+            IconButton(
+              tooltip: 'Version ${update.version} is available',
+              onPressed: _openSettings,
+              icon: Badge(
+                smallSize: 8,
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                child: const Icon(Icons.system_update_rounded),
+              ),
+            ),
           IconButton(
             tooltip: _viewMode(state) == ViewMode.grid
                 ? 'Show as a list'

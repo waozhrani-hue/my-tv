@@ -1,16 +1,56 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- file_selector_android declares minSdk 24, which is the Flutter plugin
+         template's default and not a real requirement: it calls only
+         ACTION_OPEN_DOCUMENT, available since API 19, and version-checks its
+         one API 26 feature at runtime. Overriding it lets the app install on
+         the Android 5 and 6 car head units and TV boxes that are still in
+         use. Picking a local playlist file is wrapped in a guard in the UI so
+         an older device fails with a message rather than a crash. -->
+    <uses-sdk tools:overrideLibrary="dev.flutter.packages.file_selector_android"/>
+
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Keeps the screen on during playback (wakelock_plus). -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- Lets the app hand a downloaded update to the system installer. The
+         system still shows its own confirmation; nothing installs silently. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
-    <!-- Declared so the app also installs on Android TV boxes, which is where
-         IPTV is most often watched, without excluding phones. -->
-    <uses-feature
-        android:name="android.software.leanback"
-        android:required="false"/>
-    <uses-feature
-        android:name="android.hardware.touchscreen"
-        android:required="false"/>
+    <!-- Hardware declarations.
+         TV boxes and car head units have no touchscreen, usually no
+         telephony, camera, GPS or microphone, and some have wired ethernet
+         rather than Wi-Fi. Android treats an undeclared feature a plugin
+         pulls in as REQUIRED, which silently blocks installation on those
+         devices, so every one of them is declared optional here. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+    <uses-feature android:name="android.hardware.touchscreen.multitouch" android:required="false"/>
+    <uses-feature android:name="android.hardware.faketouch" android:required="false"/>
+    <uses-feature android:name="android.software.leanback" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.any" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+    <uses-feature android:name="android.hardware.location" android:required="false"/>
+    <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
+    <uses-feature android:name="android.hardware.location.network" android:required="false"/>
+    <uses-feature android:name="android.hardware.wifi" android:required="false"/>
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>
+    <uses-feature android:name="android.hardware.usb.host" android:required="false"/>
+    <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false"/>
+    <!-- Car head units are landscape-only; TVs likewise. Declaring both
+         orientations optional keeps either kind installable. -->
+    <uses-feature android:name="android.hardware.screen.portrait" android:required="false"/>
+    <uses-feature android:name="android.hardware.screen.landscape" android:required="false"/>
+
+    <supports-screens
+        android:smallScreens="true"
+        android:normalScreens="true"
+        android:largeScreens="true"
+        android:xlargeScreens="true"
+        android:anyDensity="true"
+        android:resizeable="true"/>
 
     <application
         android:label="@string/app_name"
@@ -27,8 +67,9 @@
             android:launchMode="singleTop"
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode|navigation|touchscreen"
             android:hardwareAccelerated="true"
+            android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize">
             <!-- Specifies an Android theme to apply to this Activity as soon as
                  the Android process has started. This theme is visible to the user
@@ -41,9 +82,23 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+                <!-- Makes the app appear on an Android TV home screen. -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- Hands the downloaded update APK to the package installer. A plain
+             file:// URI is rejected from Android 7 on. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"/>
+        </provider>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

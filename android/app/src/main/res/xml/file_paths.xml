@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Paths the FileProvider may share. Only the update download needs one:
+     the package installer runs in another process and cannot read a plain
+     file path from this app's sandbox. -->
+<paths>
+    <cache-path name="updates" path="updates/"/>
+    <files-path name="internal" path="."/>
+    <external-files-path name="external" path="."/>
+</paths>

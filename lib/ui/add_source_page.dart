@@ -186,20 +186,37 @@ class _AddSourcePageState extends State<AddSourcePage>
   }
 
   Future<void> _pickFile() async {
-    final file = await openFile(
-      acceptedTypeGroups: const [
-        XTypeGroup(
-          label: 'Playlists',
-          extensions: ['m3u', 'm3u8'],
-          mimeTypes: ['audio/x-mpegurl', 'application/vnd.apple.mpegurl'],
-        ),
-      ],
-    );
+    final XFile? file;
+    try {
+      file = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: 'Playlists',
+            extensions: ['m3u', 'm3u8'],
+            mimeTypes: ['audio/x-mpegurl', 'application/vnd.apple.mpegurl'],
+          ),
+        ],
+      );
+    } catch (e) {
+      // The app installs below the file picker's declared minimum so it can
+      // run on older TV boxes and head units; if the picker is unavailable
+      // there, say so instead of crashing.
+      if (!mounted) return;
+      setState(() {
+        _message =
+            'This device has no file picker available. Use a playlist URL '
+            'instead. ($e)';
+        _messageIsError = true;
+      });
+      return;
+    }
+
     if (file == null || !mounted) return;
+    final picked = file;
     setState(() {
-      _localPath = file.path;
+      _localPath = picked.path;
       if (_name.text.trim().isEmpty) {
-        _name.text = file.name.replaceAll(RegExp(r'\.m3u8?$'), '');
+        _name.text = picked.name.replaceAll(RegExp(r'\.m3u8?$'), '');
       }
     });
   }

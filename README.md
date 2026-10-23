@@ -25,8 +25,15 @@ the resource block is compiled in a Latin-1 codepage).
   stopped at, with a progress bar across its tile and a "start over" action on
   the resume notice. Live channels always join the current broadcast.
 - **Categories, search, favourites and watch history**, all filterable.
-- **Player** — play/pause, seek on VOD, volume, mute, audio-track and subtitle
-  pickers, fullscreen, and next/previous zapping inside the current category.
+- **Player** — play/pause, volume, mute, audio-track and subtitle pickers,
+  fullscreen, and next/previous zapping inside the current category.
+- **Double-tap to skip**, as on YouTube: the left third of the video jumps
+  back, the right third jumps forward, the middle third plays or pauses.
+  Repeated taps inside 900 ms add up into one indicator — 10, 20, 30 — rather
+  than flashing separately. The step is configurable (5/10/15/30 s) and the
+  arrow keys use the same step and show the same indicator. Seeking is offered
+  wherever mpv reports a duration, so a live stream with a DVR window gets a
+  scrub bar too; a plain live feed reports none and the gesture does nothing.
 - **Offline-first** — a parsed playlist is cached for 12 hours, so launching
   does not wait on the network. A failed refresh falls back to the cache rather
   than showing nothing.
@@ -175,7 +182,7 @@ route table.
 | Key | Action |
 |---|---|
 | `Space` / `K` | Play / pause |
-| `←` / `→` | Seek ∓10 s (VOD only) |
+| `←` / `→` | Skip back / forward by the configured step |
 | `↑` / `↓` | Volume ±5 |
 | `F` | Fullscreen |
 | `M` | Mute |

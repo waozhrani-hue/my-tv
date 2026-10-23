@@ -28,6 +28,18 @@ android {
 
     defaultConfig {
         applicationId = "com.mytv.my_tv"
+        // Flutter's default, currently 24 (Android 7.0).
+        //
+        // This can be lowered to 21 for the Android 5 and 6 car head units
+        // and TV boxes still in use: 21 is the real floor, set by the jni
+        // packages media_kit depends on. file_selector_android declares 24,
+        // but that is the Flutter plugin template's default rather than a
+        // real requirement - it calls only ACTION_OPEN_DOCUMENT, available
+        // since API 19, and version-checks its one API 26 feature at runtime
+        // - so AndroidManifest.xml already carries the tools:overrideLibrary
+        // that allows it, and the file picker in add_source_page.dart is
+        // wrapped so an older device shows a message instead of crashing.
+        // Change this line to `minSdk = 21` to take it.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -58,6 +70,11 @@ android {
             isShrinkResources = false
         }
     }
+}
+
+dependencies {
+    // FileProvider, used to hand the downloaded update to the installer.
+    implementation("androidx.core:core-ktx:1.13.1")
 }
 
 kotlin {
