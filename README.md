@@ -58,6 +58,10 @@ flutter build apk --release --split-per-abi
 # Windows — build/windows/x64/runner/Release/
 flutter build windows --release
 
+# Windows installer — build/installer/MyTV-Setup-<version>.exe
+# (needs Inno Setup 6: winget install JRSoftware.InnoSetup)
+ISCC.exe installer\my-tv.iss
+
 # Run on a connected device or the desktop
 flutter run -d windows
 flutter run -d <android-device-id>
@@ -125,6 +129,18 @@ native bar (`TitleBarStyle.hidden`) and draws its own in
 `lib/ui/widgets/window_chrome.dart`, which also lets it match the dark theme.
 It is installed through `MaterialApp.builder` so it sits above the navigator
 and survives route changes, and hides itself during fullscreen playback.
+
+### Sharing the Windows build
+
+`MyTV.exe` does not run on its own — it needs `libmpv-2.dll`,
+`flutter_windows.dll`, the plugin DLLs and the `data/` directory beside it. So
+the thing to hand someone is the installer from `installer/my-tv.iss`, which
+packs the whole Release folder into one file, installs per user (no
+administrator rights), and leaves an entry in Add or Remove Programs.
+
+The installer is not code-signed, so Windows SmartScreen shows a
+"Windows protected your PC" prompt on first run; **More info → Run anyway**
+gets past it. Signing it needs a code-signing certificate.
 
 ### Icons
 
