@@ -13,8 +13,14 @@ class LocalStore {
 
   final Directory _dir;
 
-  static Future<LocalStore> open() async {
-    final base = await getApplicationSupportDirectory();
+  static Future<LocalStore> open() async =>
+      openIn(await getApplicationSupportDirectory());
+
+  /// Opens the store under an explicit directory.
+  ///
+  /// Tests use this: the host platform has no path_provider implementation,
+  /// so [open] would hang waiting on a channel nothing answers.
+  static Future<LocalStore> openIn(Directory base) async {
     final dir = Directory('${base.path}${Platform.pathSeparator}data');
     if (!await dir.exists()) await dir.create(recursive: true);
     return LocalStore._(dir);

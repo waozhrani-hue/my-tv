@@ -5,9 +5,13 @@ import '../theme.dart';
 
 /// Wordmark used on the welcome screen and in the browse header.
 class AppLogo extends StatelessWidget {
-  const AppLogo({super.key, this.size = 40});
+  const AppLogo({super.key, this.size = 40, this.showLabel = true});
 
   final double size;
+
+  /// The wordmark is dropped where horizontal space is tight, such as the
+  /// phone header.
+  final bool showLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -32,15 +36,17 @@ class AppLogo extends StatelessWidget {
             color: AppTheme.background,
           ),
         ),
-        SizedBox(width: size * 0.32),
-        Text(
-          'My TV',
-          style: TextStyle(
-            fontSize: size * 0.56,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.6,
+        if (showLabel) ...[
+          SizedBox(width: size * 0.32),
+          Text(
+            'My TV',
+            style: TextStyle(
+              fontSize: size * 0.56,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.6,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }

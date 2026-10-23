@@ -171,7 +171,9 @@ class _BrowsePageState extends State<BrowsePage> {
       child: Row(
         children: [
           if (compact) ...[
-            const AppLogo(size: 30),
+            // Mark only: the wordmark costs about 60px that a phone header
+            // cannot spare, and the app name is already in the task switcher.
+            const AppLogo(size: 28, showLabel: false),
             const SizedBox(width: 10),
           ],
           Expanded(
@@ -207,8 +209,12 @@ class _BrowsePageState extends State<BrowsePage> {
               ],
             ),
           ),
-          SizedBox(
-            width: compact ? 150 : 280,
+          // Flexible on a phone: a fixed width plus the action buttons was
+          // wider than the screen, and Row silently clips what overflows -
+          // which hid the menu holding Settings entirely.
+          _Flexible(
+            flex: compact,
+            width: 280,
             child: TextField(
               controller: _search,
               onChanged: (_) => setState(() {}),
@@ -242,25 +248,33 @@ class _BrowsePageState extends State<BrowsePage> {
                 child: const Icon(Icons.system_update_rounded),
               ),
             ),
-          IconButton(
-            tooltip: _viewMode(state) == ViewMode.grid
-                ? 'Show as a list'
-                : 'Show as a grid',
-            onPressed: () => _toggleViewMode(state),
-            icon: Icon(
-              _viewMode(state) == ViewMode.grid
-                  ? Icons.view_list_rounded
-                  : Icons.grid_view_rounded,
+          // On a phone these two move into the menu, so the row always fits.
+          if (!compact) ...[
+            IconButton(
+              tooltip: _viewMode(state) == ViewMode.grid
+                  ? 'Show as a list'
+                  : 'Show as a grid',
+              onPressed: () => _toggleViewMode(state),
+              icon: Icon(
+                _viewMode(state) == ViewMode.grid
+                    ? Icons.view_list_rounded
+                    : Icons.grid_view_rounded,
+              ),
             ),
+            IconButton(
+              tooltip: 'Reload playlist',
+              onPressed: state.status == LoadStatus.loading
+                  ? null
+                  : state.refresh,
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          ],
+          _SourceMenu(
+            onSettings: _openSettings,
+            onRefresh: compact ? state.refresh : null,
+            onToggleView: compact ? () => _toggleViewMode(state) : null,
+            viewMode: _viewMode(state),
           ),
-          IconButton(
-            tooltip: 'Reload playlist',
-            onPressed: state.status == LoadStatus.loading
-                ? null
-                : state.refresh,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-          _SourceMenu(onSettings: _openSettings),
         ],
       ),
     );
@@ -407,16 +421,45 @@ class _BrowsePageState extends State<BrowsePage> {
 
 // --- Playlist switcher -------------------------------------------------------
 
+/// Lets a child be a fixed width on a wide window and flexible on a phone.
+class _Flexible extends StatelessWidget {
+  const _Flexible({
+    required this.flex,
+    required this.width,
+    required this.child,
+  });
+
+  final bool flex;
+  final double width;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) =>
+      flex ? Expanded(child: child) : SizedBox(width: width, child: child);
+}
+
+/// Playlist switcher, and on a phone the home for the actions that do not fit
+/// in the header.
 class _SourceMenu extends StatelessWidget {
-  const _SourceMenu({required this.onSettings});
+  const _SourceMenu({
+    required this.onSettings,
+    required this.viewMode,
+    this.onRefresh,
+    this.onToggleView,
+  });
 
   final VoidCallback onSettings;
+  final ViewMode viewMode;
+
+  /// Non-null only in the compact layout, where these have no header button.
+  final VoidCallback? onRefresh;
+  final VoidCallback? onToggleView;
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     return PopupMenuButton<String>(
-      tooltip: 'Playlists',
+      tooltip: 'Menu',
       icon: const Icon(Icons.more_vert_rounded),
       onSelected: (value) {
         switch (value) {
@@ -426,11 +469,48 @@ class _SourceMenu extends StatelessWidget {
             );
           case '#settings':
             onSettings();
+          case '#refresh':
+            onRefresh?.call();
+          case '#view':
+            onToggleView?.call();
           default:
             state.selectSource(value);
         }
       },
       itemBuilder: (context) => [
+        if (onToggleView != null)
+          PopupMenuItem<String>(
+            value: '#view',
+            child: Row(
+              children: [
+                Icon(
+                  viewMode == ViewMode.grid
+                      ? Icons.view_list_rounded
+                      : Icons.grid_view_rounded,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  viewMode == ViewMode.grid
+                      ? 'Show as a list'
+                      : 'Show as a grid',
+                ),
+              ],
+            ),
+          ),
+        if (onRefresh != null)
+          PopupMenuItem<String>(
+            value: '#refresh',
+            enabled: state.status != LoadStatus.loading,
+            child: const Row(
+              children: [
+                Icon(Icons.refresh_rounded, size: 18),
+                SizedBox(width: 10),
+                Text('Reload playlist'),
+              ],
+            ),
+          ),
+        if (onToggleView != null || onRefresh != null) const PopupMenuDivider(),
         const PopupMenuItem<String>(
           enabled: false,
           height: 34,
