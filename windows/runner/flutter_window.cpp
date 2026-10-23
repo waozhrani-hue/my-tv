@@ -25,9 +25,20 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  RegisterWindowChannel();
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
+    // By the first frame, Dart has already asked window_manager to hide the
+    // native caption. Recalculating the frame here - before the window is
+    // ever shown - means the stale caption strip is never on screen, rather
+    // than appearing and then clearing itself.
+    HWND hwnd = GetHandle();
+    if (hwnd != nullptr) {
+      SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                   SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                       SWP_NOACTIVATE);
+    }
     this->Show();
   });
 
@@ -37,6 +48,49 @@ bool FlutterWindow::OnCreate() {
   flutter_controller_->ForceRedraw();
 
   return true;
+}
+
+void FlutterWindow::RegisterWindowChannel() {
+  window_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "com.mytv.my_tv/window",
+          &flutter::StandardMethodCodec::GetInstance());
+
+  window_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        HWND hwnd = GetHandle();
+        if (hwnd == nullptr) {
+          result->Error("no_window", "The window is not available.");
+          return;
+        }
+
+        const std::string& method = call.method_name();
+        if (method == "minimize") {
+          ShowWindow(hwnd, SW_MINIMIZE);
+          result->Success();
+        } else if (method == "toggleMaximize") {
+          const bool maximized = IsZoomed(hwnd) != FALSE;
+          ShowWindow(hwnd, maximized ? SW_RESTORE : SW_MAXIMIZE);
+          result->Success(flutter::EncodableValue(!maximized));
+        } else if (method == "isMaximized") {
+          result->Success(flutter::EncodableValue(IsZoomed(hwnd) != FALSE));
+        } else if (method == "refreshFrame") {
+          // Hiding the native caption changes the window styles, but Windows
+          // keeps drawing the old non-client area until it is told to
+          // recalculate the frame. Without this, a stale white strip sits
+          // across the top until the first click forces a repaint.
+          SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                       SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE |
+                           SWP_NOZORDER | SWP_NOACTIVATE);
+          RedrawWindow(hwnd, nullptr, nullptr,
+                       RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW);
+          result->Success();
+        } else {
+          result->NotImplemented();
+        }
+      });
 }
 
 void FlutterWindow::OnDestroy() {

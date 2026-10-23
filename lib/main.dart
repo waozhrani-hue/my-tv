@@ -36,7 +36,10 @@ Future<void> main() async {
         windowButtonVisibility: false,
       ),
       () async {
-        await windowManager.show();
+        // Deliberately no show() here. The runner shows the window on its
+        // first frame, after it has recalculated the frame that hiding the
+        // native caption invalidated — showing it from Dart first puts the
+        // stale caption strip on screen for a moment.
         await windowManager.focus();
       },
     );

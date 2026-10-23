@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app_info.dart';
@@ -27,6 +28,15 @@ class WindowChrome extends StatefulWidget {
 class _WindowChromeState extends State<WindowChrome> with WindowListener {
   static const _barHeight = 36.0;
 
+  /// Implemented in windows/runner/flutter_window.cpp.
+  ///
+  /// window_manager's `minimize()` does nothing on this window — verified
+  /// against a build where the same button wiring worked for maximise and
+  /// close — and its `isMaximized()` misreports once the native caption is
+  /// hidden, so restoring never fired. Win32 handles both correctly, so these
+  /// two go straight there.
+  static const _native = MethodChannel('com.mytv.my_tv/window');
+
   var _maximized = false;
   var _fullscreen = false;
 
@@ -36,6 +46,20 @@ class _WindowChromeState extends State<WindowChrome> with WindowListener {
     if (!WindowChrome.isSupported) return;
     windowManager.addListener(this);
     _sync();
+    // Done after the first frame, by which point window_manager has applied
+    // the hidden title bar; this is what clears the stale caption strip it
+    // leaves behind.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshFrame());
+  }
+
+  Future<void> _refreshFrame() async {
+    try {
+      await _native.invokeMethod<void>('refreshFrame');
+    } on PlatformException {
+      // Cosmetic only; the window works either way.
+    } on MissingPluginException {
+      // Running against a build without the native channel.
+    }
   }
 
   @override
@@ -45,13 +69,33 @@ class _WindowChromeState extends State<WindowChrome> with WindowListener {
   }
 
   Future<void> _sync() async {
-    final maximized = await windowManager.isMaximized();
+    final maximized = await _isMaximized();
     final fullscreen = await windowManager.isFullScreen();
     if (!mounted) return;
     setState(() {
       _maximized = maximized;
       _fullscreen = fullscreen;
     });
+  }
+
+  Future<bool> _isMaximized() async {
+    try {
+      return await _native.invokeMethod<bool>('isMaximized') ?? false;
+    } on PlatformException {
+      return windowManager.isMaximized();
+    } on MissingPluginException {
+      return windowManager.isMaximized();
+    }
+  }
+
+  Future<void> _minimize() async {
+    try {
+      await _native.invokeMethod<void>('minimize');
+    } on PlatformException {
+      await windowManager.minimize();
+    } on MissingPluginException {
+      await windowManager.minimize();
+    }
   }
 
   @override
@@ -67,6 +111,17 @@ class _WindowChromeState extends State<WindowChrome> with WindowListener {
   void onWindowLeaveFullScreen() => setState(() => _fullscreen = false);
 
   Future<void> _toggleMaximize() async {
+    try {
+      final nowMaximized = await _native.invokeMethod<bool>('toggleMaximize');
+      if (nowMaximized != null && mounted) {
+        setState(() => _maximized = nowMaximized);
+      }
+      return;
+    } on PlatformException {
+      // Fall through to the plugin.
+    } on MissingPluginException {
+      // Fall through to the plugin.
+    }
     if (await windowManager.isMaximized()) {
       await windowManager.unmaximize();
     } else {
@@ -126,7 +181,7 @@ class _WindowChromeState extends State<WindowChrome> with WindowListener {
                 _CaptionButton(
                   icon: Icons.remove,
                   tooltip: 'Minimise',
-                  onPressed: windowManager.minimize,
+                  onPressed: _minimize,
                 ),
                 _CaptionButton(
                   icon: _maximized
