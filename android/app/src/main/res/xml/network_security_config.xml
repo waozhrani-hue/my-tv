@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A large share of IPTV providers still serve playlists and streams over plain
+  HTTP, and Android blocks cleartext by default from API 28 on. Allowing it is
+  what makes those playlists playable at all; HTTPS is still used whenever the
+  provider offers it.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+            <certificates src="user"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher label. The edition name is shown inside the app only, so what
+     the launcher and the task switcher display stays just the product name. -->
+<resources>
+    <string name="app_name">My TV</string>
+</resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The teal tile behind the mark. Drawn as a gradient rather than a bitmap so
+     it stays crisp at every launcher size and mask shape. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:startColor="#3CF0C4"
+        android:endColor="#0E967E"
+        android:angle="315"/>
+</shape>

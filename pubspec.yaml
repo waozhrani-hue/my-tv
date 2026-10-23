@@ -1,0 +1,38 @@
+name: my_tv
+description: "My TV - an IPTV stream player for Windows and Android."
+publish_to: 'none'
+# Keep in step with AppInfo.version in lib/app_info.dart.
+version: 1.1.0+2
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Playback engine (libmpv): handles HLS, MPEG-TS, RTMP, RTSP and VOD.
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.7
+
+  # State, networking, storage
+  provider: ^6.1.5+1
+  http: ^1.6.0
+  path_provider: ^2.1.6
+  collection: ^1.19.1
+
+  # Platform integration
+  window_manager: ^0.5.2
+  wakelock_plus: ^1.8.2
+  file_selector: ^1.1.0
+  # 4.0.5+ pulls material_ui, which needs a newer Dart than this SDK ships.
+  cached_network_image: ^4.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
