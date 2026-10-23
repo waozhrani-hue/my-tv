@@ -58,8 +58,11 @@ flutter pub get
 # Android — one APK that installs on any device, in
 # build/app/outputs/flutter-apk/app-release.apk
 flutter build apk --release
+pwsh tool/sign-apk.ps1          # adds the v1 signature; see below
 
-# Or smaller per-architecture APKs, if you know the target
+# Or smaller per-architecture APKs, if you know the target. Note these carry
+# an ABI offset in their versionCode (arm64 = +2000), so a later universal
+# APK looks like a downgrade and will not install over one.
 flutter build apk --release --split-per-abi
 
 # Windows — build/windows/x64/runner/Release/
@@ -101,6 +104,21 @@ storeFile=mytv-release.jks
 
 Back the keystore up. Losing it means no future build can install over an
 existing copy of the app.
+
+**Always run `tool/sign-apk.ps1` on a release APK.** With `minSdk` at 24 the
+toolchain signs with v2 and v3 and drops the v1 (JAR) signature, because AOSP
+does not need it — but some vendor package installers do, and Honor and Huawei
+reject a v1-less APK as "package appears to be invalid". Setting
+`enableV1Signing` in `build.gradle.kts` is ignored, and `apksigner` skips v1
+too unless told the minimum is below 24, which the script does for signing
+only; the manifest still declares 24.
+
+The same flag is needed to *see* it afterwards — without it apksigner reports
+v1 as false simply because it did not check:
+
+```bash
+apksigner verify --verbose --min-sdk-version 21 <apk>
+```
 
 ## Project layout
 

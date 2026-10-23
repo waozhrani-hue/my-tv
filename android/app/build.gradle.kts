@@ -54,6 +54,14 @@ android {
                 storeFile = file(keystoreProperties["storeFile"] as String)
                 storePassword = keystoreProperties["storePassword"] as String
             }
+            // All three schemes, explicitly. With minSdk 24 the toolchain
+            // signs with v2 only, and some vendor package installers - Honor
+            // and Huawei in particular - reject an APK with no v1 signature
+            // as "package appears to be invalid". v1 costs a little build
+            // time and nothing else.
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 

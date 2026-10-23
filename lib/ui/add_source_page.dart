@@ -37,6 +37,17 @@ class _AddSourcePageState extends State<AddSourcePage>
   final _user = TextEditingController();
   final _pass = TextEditingController();
 
+  // Without these, finishing a field on a TV remote hands focus to whatever
+  // the traversal policy finds next - which lands at the bottom of the form
+  // rather than on the following field.
+  final _nameFocus = FocusNode();
+  final _urlFocus = FocusNode();
+  final _epgFocus = FocusNode();
+  final _agentFocus = FocusNode();
+  final _hostFocus = FocusNode();
+  final _userFocus = FocusNode();
+  final _passFocus = FocusNode();
+
   String? _localPath;
   bool _busy = false;
   bool _showPassword = false;
@@ -83,6 +94,17 @@ class _AddSourcePageState extends State<AddSourcePage>
     _tabs.dispose();
     for (final c in [_name, _url, _epg, _agent, _host, _user, _pass]) {
       c.dispose();
+    }
+    for (final f in [
+      _nameFocus,
+      _urlFocus,
+      _epgFocus,
+      _agentFocus,
+      _hostFocus,
+      _userFocus,
+      _passFocus,
+    ]) {
+      f.dispose();
     }
     super.dispose();
   }
@@ -133,6 +155,8 @@ class _AddSourcePageState extends State<AddSourcePage>
             label: 'Name',
             hint: 'My provider',
             icon: Icons.label_outline_rounded,
+            focusNode: _nameFocus,
+            nextFocus: usingFile ? _epgFocus : _urlFocus,
             validator: _required,
           ),
           const SizedBox(height: 14),
@@ -147,6 +171,8 @@ class _AddSourcePageState extends State<AddSourcePage>
               label: 'Playlist URL',
               hint: 'http://example.com/playlist.m3u',
               icon: Icons.link_rounded,
+              focusNode: _urlFocus,
+              nextFocus: _epgFocus,
               keyboardType: TextInputType.url,
               validator: _requiredUrl,
             ),
@@ -167,6 +193,8 @@ class _AddSourcePageState extends State<AddSourcePage>
             label: 'Guide URL (optional)',
             hint: 'XMLTV address, if your provider has one',
             icon: Icons.calendar_month_rounded,
+            focusNode: _epgFocus,
+            nextFocus: _agentFocus,
             keyboardType: TextInputType.url,
           ),
           const SizedBox(height: 14),
@@ -258,6 +286,8 @@ class _AddSourcePageState extends State<AddSourcePage>
             label: 'Name',
             hint: 'My provider',
             icon: Icons.label_outline_rounded,
+            focusNode: _nameFocus,
+            nextFocus: _hostFocus,
             validator: _required,
           ),
           const SizedBox(height: 14),
@@ -266,6 +296,8 @@ class _AddSourcePageState extends State<AddSourcePage>
             label: 'Server',
             hint: 'http://example.com:8080',
             icon: Icons.dns_rounded,
+            focusNode: _hostFocus,
+            nextFocus: _userFocus,
             keyboardType: TextInputType.url,
             validator: _required,
           ),
@@ -274,6 +306,8 @@ class _AddSourcePageState extends State<AddSourcePage>
             controller: _user,
             label: 'Username',
             icon: Icons.person_outline_rounded,
+            focusNode: _userFocus,
+            nextFocus: _passFocus,
             validator: _required,
           ),
           const SizedBox(height: 14),
@@ -281,6 +315,8 @@ class _AddSourcePageState extends State<AddSourcePage>
             controller: _pass,
             label: 'Password',
             icon: Icons.lock_outline_rounded,
+            focusNode: _passFocus,
+            nextFocus: _agentFocus,
             obscure: !_showPassword,
             validator: _required,
             suffix: IconButton(
@@ -395,17 +431,21 @@ class _AddSourcePageState extends State<AddSourcePage>
     navigator.pop();
   }
 
+  /// Last field in both forms, so it closes the keyboard rather than moving on.
   Widget _agentField() => _field(
     controller: _agent,
     label: 'User-Agent (optional)',
     hint: Settings.defaultUserAgent,
     icon: Icons.badge_outlined,
+    focusNode: _agentFocus,
   );
 
   Widget _field({
     required TextEditingController controller,
     required String label,
     required IconData icon,
+    FocusNode? focusNode,
+    FocusNode? nextFocus,
     String? hint,
     bool obscure = false,
     Widget? suffix,
@@ -414,11 +454,24 @@ class _AddSourcePageState extends State<AddSourcePage>
   }) {
     return TextFormField(
       controller: controller,
+      focusNode: focusNode,
       obscureText: obscure,
       keyboardType: keyboardType,
       autocorrect: false,
       enableSuggestions: false,
       validator: validator,
+      // "Next" until the last field, so a remote or a soft keyboard walks
+      // down the form instead of jumping past it.
+      textInputAction: nextFocus == null
+          ? TextInputAction.done
+          : TextInputAction.next,
+      onFieldSubmitted: (_) {
+        if (nextFocus != null) {
+          FocusScope.of(context).requestFocus(nextFocus);
+        } else {
+          FocusScope.of(context).unfocus();
+        }
+      },
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
