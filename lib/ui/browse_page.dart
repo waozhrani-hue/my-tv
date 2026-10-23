@@ -150,6 +150,12 @@ class _BrowsePageState extends State<BrowsePage> {
     return Column(
       children: [
         _header(state, compact: true),
+        // Full width, so a search is still readable once it is more than a
+        // word long.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+          child: _searchField(),
+        ),
         if (groups.isNotEmpty)
           _GroupChips(
             groups: groups,
@@ -163,6 +169,32 @@ class _BrowsePageState extends State<BrowsePage> {
   }
 
   // --- Header --------------------------------------------------------------
+
+  Widget _searchField() {
+    return TextField(
+      controller: _search,
+      onChanged: (_) => setState(() {}),
+      textInputAction: TextInputAction.search,
+      style: const TextStyle(fontSize: 15),
+      decoration: InputDecoration(
+        hintText: 'Search channels and films',
+        isDense: true,
+        prefixIcon: const Icon(Icons.search_rounded, size: 19),
+        prefixIconConstraints: const BoxConstraints(minWidth: 40),
+        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        suffixIcon: _search.text.isEmpty
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18),
+                tooltip: 'Clear',
+                onPressed: () {
+                  _search.clear();
+                  setState(() {});
+                },
+              ),
+      ),
+    );
+  }
 
   Widget _header(AppState state, {required bool compact}) {
     final count = _items(state).length;
@@ -181,18 +213,17 @@ class _BrowsePageState extends State<BrowsePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (!compact)
-                  Text(
-                    _group ?? _section.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 19,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.2,
-                    ),
+                Text(
+                  _group ?? _section.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: compact ? 15.5 : 19,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.2,
                   ),
-                if (!compact && state.status == LoadStatus.ready)
+                ),
+                if (state.status == LoadStatus.ready)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
@@ -201,7 +232,7 @@ class _BrowsePageState extends State<BrowsePage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12.5,
+                        fontSize: compact ? 11.5 : 12.5,
                         color: Colors.white.withValues(alpha: 0.5),
                       ),
                     ),
@@ -209,35 +240,13 @@ class _BrowsePageState extends State<BrowsePage> {
               ],
             ),
           ),
-          // Flexible on a phone: a fixed width plus the action buttons was
-          // wider than the screen, and Row silently clips what overflows -
-          // which hid the menu holding Settings entirely.
-          _Flexible(
-            flex: compact,
-            width: 280,
-            child: TextField(
-              controller: _search,
-              onChanged: (_) => setState(() {}),
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: 'Search',
-                isDense: true,
-                prefixIcon: const Icon(Icons.search_rounded, size: 19),
-                prefixIconConstraints: const BoxConstraints(minWidth: 40),
-                contentPadding: const EdgeInsets.symmetric(vertical: 11),
-                suffixIcon: _search.text.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.close_rounded, size: 17),
-                        onPressed: () {
-                          _search.clear();
-                          setState(() {});
-                        },
-                      ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 4),
+          // Sharing the header row with the logo and the action buttons left
+          // the phone barely a dozen characters of visible text. On compact
+          // it moves to a full-width row of its own; see _buildNarrow.
+          if (!compact) ...[
+            SizedBox(width: 280, child: _searchField()),
+            const SizedBox(width: 4),
+          ],
           if (state.availableUpdate case final update?)
             IconButton(
               tooltip: state.isDownloadingUpdate
@@ -434,23 +443,6 @@ class _BrowsePageState extends State<BrowsePage> {
 }
 
 // --- Playlist switcher -------------------------------------------------------
-
-/// Lets a child be a fixed width on a wide window and flexible on a phone.
-class _Flexible extends StatelessWidget {
-  const _Flexible({
-    required this.flex,
-    required this.width,
-    required this.child,
-  });
-
-  final bool flex;
-  final double width;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) =>
-      flex ? Expanded(child: child) : SizedBox(width: width, child: child);
-}
 
 /// Playlist switcher, and on a phone the home for the actions that do not fit
 /// in the header.
