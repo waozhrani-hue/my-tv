@@ -240,13 +240,27 @@ class _BrowsePageState extends State<BrowsePage> {
           const SizedBox(width: 4),
           if (state.availableUpdate case final update?)
             IconButton(
-              tooltip: 'Version ${update.version} is available',
+              tooltip: state.isDownloadingUpdate
+                  ? 'Downloading ${update.version} — '
+                        '${(state.downloadProgress * 100).round()}%'
+                  : 'Version ${update.version} is available',
               onPressed: _openSettings,
-              icon: Badge(
-                smallSize: 8,
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                child: const Icon(Icons.system_update_rounded),
-              ),
+              icon: state.isDownloadingUpdate
+                  // Shows the transfer is still running after the user has
+                  // left the settings screen.
+                  ? SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        value: state.downloadProgress,
+                        strokeWidth: 2.4,
+                      ),
+                    )
+                  : Badge(
+                      smallSize: 8,
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      child: const Icon(Icons.system_update_rounded),
+                    ),
             ),
           // On a phone these two move into the menu, so the row always fits.
           if (!compact) ...[
@@ -739,7 +753,7 @@ class _ItemList extends StatelessWidget {
                       const SizedBox(width: 6),
                     ],
                     IconButton(
-                      onPressed: () => state.toggleFavorite(item.id),
+                      onPressed: () => state.toggleFavorite(item),
                       tooltip: isFavorite
                           ? 'Remove from favourites'
                           : 'Add to favourites',
@@ -839,7 +853,7 @@ class _ItemGrid extends StatelessWidget {
                     top: 2,
                     right: 2,
                     child: IconButton(
-                      onPressed: () => state.toggleFavorite(item.id),
+                      onPressed: () => state.toggleFavorite(item),
                       iconSize: 19,
                       style: IconButton.styleFrom(
                         backgroundColor: Colors.black.withValues(alpha: 0.45),

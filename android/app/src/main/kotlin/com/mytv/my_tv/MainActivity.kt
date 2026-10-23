@@ -1,9 +1,13 @@
 package com.mytv.my_tv
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -23,6 +27,7 @@ class MainActivity : FlutterActivity() {
     private companion object {
         const val CHANNEL = "com.mytv.my_tv/installer"
         const val APK_MIME = "application/vnd.android.package-archive"
+        const val NOTIFICATION_REQUEST = 7311
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -47,6 +52,31 @@ class MainActivity : FlutterActivity() {
                                 .onSuccess { result.success(true) }
                                 .onFailure { result.error("install_failed", it.message, null) }
                         }
+                    }
+
+                    "startBackgroundDownload" -> {
+                        val url = call.argument<String>("url")
+                        val name = call.argument<String>("name") ?: "update.apk"
+                        if (url.isNullOrEmpty()) {
+                            result.error("no_url", "A download URL is required.", null)
+                        } else {
+                            runCatching { startDownloadService(url, name) }
+                                .onSuccess { result.success(true) }
+                                .onFailure { result.error("start_failed", it.message, null) }
+                        }
+                    }
+
+                    "downloadStatus" ->
+                        result.success(UpdateDownloadService.status(this))
+
+                    "clearDownloadStatus" -> {
+                        UpdateDownloadService.clear(this)
+                        result.success(null)
+                    }
+
+                    "requestNotificationPermission" -> {
+                        requestNotificationPermission()
+                        result.success(null)
                     }
 
                     else -> result.notImplemented()
@@ -74,6 +104,37 @@ class MainActivity : FlutterActivity() {
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(intent)
+    }
+
+    /** Hands the transfer to a foreground service so it outlives this screen. */
+    private fun startDownloadService(url: String, name: String) {
+        val intent = Intent(this, UpdateDownloadService::class.java).apply {
+            putExtra(UpdateDownloadService.EXTRA_URL, url)
+            putExtra(UpdateDownloadService.EXTRA_NAME, name)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    /**
+     * Asks for POST_NOTIFICATIONS on Android 13+. Only the progress
+     * notification depends on it — the download runs either way.
+     */
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) return
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            NOTIFICATION_REQUEST,
+        )
     }
 
     private fun installApk(path: String) {

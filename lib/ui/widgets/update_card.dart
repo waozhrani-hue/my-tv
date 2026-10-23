@@ -10,7 +10,9 @@ import '../../state/app_state.dart';
 /// Checks GitHub for a newer build and, when there is one, downloads it and
 /// opens the installer.
 ///
-/// Nothing installs without the user: Android shows its own package-installer
+/// The download itself lives in [AppState], not here, so leaving this screen
+/// does not abandon it: come back and the progress is where it should be.
+/// Nothing installs without the user — Android shows its own package-installer
 /// confirmation, and on Windows the setup program opens normally.
 class UpdateCard extends StatefulWidget {
   const UpdateCard({super.key});
@@ -19,20 +21,21 @@ class UpdateCard extends StatefulWidget {
   State<UpdateCard> createState() => _UpdateCardState();
 }
 
-enum _Stage { idle, checking, downloading, ready }
-
 class _UpdateCardState extends State<UpdateCard> {
-  _Stage _stage = _Stage.idle;
-  double _progress = 0;
+  var _checking = false;
   String? _message;
-  bool _isError = false;
-  File? _downloaded;
+  var _isError = false;
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final release = state.availableUpdate;
     final scheme = Theme.of(context).colorScheme;
+
+    final downloading = state.isDownloadingUpdate;
+    final downloaded = state.downloadedUpdate;
+    final error = state.downloadError ?? _message;
+    final isError = state.downloadError != null || _isError;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -92,21 +95,25 @@ class _UpdateCardState extends State<UpdateCard> {
               ),
             ],
 
-            if (_stage == _Stage.downloading) ...[
+            if (downloading) ...[
               const SizedBox(height: 14),
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(value: _progress, minHeight: 6),
+                child: LinearProgressIndicator(
+                  value: state.downloadProgress,
+                  minHeight: 6,
+                ),
               ),
               const SizedBox(height: 6),
               Text(
-                'Downloading ${(_progress * 100).round()}%'
-                '${_sizeLabel(release?.assetBytes)}',
-                style: const TextStyle(fontSize: 12),
+                'Downloading ${(state.downloadProgress * 100).round()}%'
+                '${_sizeLabel(release?.assetBytes)}\n'
+                '${Platform.isAndroid ? 'It keeps going if you close the app — watch the notification.' : 'It keeps going if you leave this screen.'}',
+                style: const TextStyle(fontSize: 12, height: 1.4),
               ),
             ],
 
-            if (_message != null) ...[
+            if (error != null) ...[
               const SizedBox(height: 12),
               Container(
                 width: double.infinity,
@@ -115,20 +122,20 @@ class _UpdateCardState extends State<UpdateCard> {
                   vertical: 10,
                 ),
                 decoration: BoxDecoration(
-                  color: (_isError ? scheme.error : scheme.primary)
+                  color: (isError ? scheme.error : scheme.primary)
                       .withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: (_isError ? scheme.error : scheme.primary)
+                    color: (isError ? scheme.error : scheme.primary)
                         .withValues(alpha: 0.4),
                   ),
                 ),
                 child: Text(
-                  _message!,
+                  error,
                   style: TextStyle(
                     fontSize: 12.5,
                     height: 1.45,
-                    color: _isError ? scheme.error : scheme.primary,
+                    color: isError ? scheme.error : scheme.primary,
                   ),
                 ),
               ),
@@ -139,8 +146,8 @@ class _UpdateCardState extends State<UpdateCard> {
               children: [
                 if (release == null)
                   OutlinedButton.icon(
-                    onPressed: _stage == _Stage.checking ? null : _check,
-                    icon: _stage == _Stage.checking
+                    onPressed: _checking ? null : _check,
+                    icon: _checking
                         ? const SizedBox(
                             width: 15,
                             height: 15,
@@ -151,26 +158,28 @@ class _UpdateCardState extends State<UpdateCard> {
                   )
                 else ...[
                   FilledButton.icon(
-                    onPressed: _stage == _Stage.downloading
+                    onPressed: downloading
                         ? null
-                        : () => _stage == _Stage.ready
-                              ? _install()
-                              : _downloadAndInstall(release),
+                        : downloaded != null
+                              ? () => _install(downloaded)
+                              : () => _startDownload(state),
                     icon: Icon(
-                      _stage == _Stage.ready
+                      downloaded != null
                           ? Icons.install_mobile_rounded
                           : Icons.download_rounded,
                       size: 18,
                     ),
                     label: Text(
-                      _stage == _Stage.ready
-                          ? 'Install now'
-                          : 'Download and install',
+                      downloading
+                          ? 'Downloading…'
+                          : downloaded != null
+                                ? 'Install now'
+                                : 'Download and install',
                     ),
                   ),
                   const SizedBox(width: 10),
                   OutlinedButton(
-                    onPressed: _stage == _Stage.downloading ? null : _check,
+                    onPressed: downloading || _checking ? null : _check,
                     child: const Text('Re-check'),
                   ),
                 ],
@@ -195,11 +204,12 @@ class _UpdateCardState extends State<UpdateCard> {
 
   Future<void> _check() async {
     setState(() {
-      _stage = _Stage.checking;
+      _checking = true;
       _message = null;
-      _downloaded = null;
+      _isError = false;
     });
     final state = context.read<AppState>();
+    state.clearDownloadError();
     try {
       final release = await state.checkForUpdate();
       if (!mounted) return;
@@ -209,14 +219,20 @@ class _UpdateCardState extends State<UpdateCard> {
         setState(() => _message = null);
       }
     } finally {
-      if (mounted) setState(() => _stage = _Stage.idle);
+      if (mounted) setState(() => _checking = false);
     }
   }
 
-  Future<void> _downloadAndInstall(AppRelease release) async {
-    final service = context.read<AppState>().updates;
+  Future<void> _startDownload(AppState state) async {
+    final service = state.updates;
+    setState(() {
+      _message = null;
+      _isError = false;
+    });
+    state.clearDownloadError();
 
-    // Ask for the install permission first, so the download is not wasted.
+    // Ask for the install permission first, so a 90 MB download is not wasted
+    // on a device that will refuse to install it.
     if (Platform.isAndroid && !await service.canRequestInstalls()) {
       if (!mounted) return;
       _say(
@@ -228,37 +244,12 @@ class _UpdateCardState extends State<UpdateCard> {
       return;
     }
 
-    setState(() {
-      _stage = _Stage.downloading;
-      _progress = 0;
-      _message = null;
-    });
-
-    try {
-      final file = await service.download(
-        release,
-        onProgress: (p) {
-          if (mounted) setState(() => _progress = p);
-        },
-      );
-      if (!mounted) return;
-      setState(() {
-        _downloaded = file;
-        _stage = _Stage.ready;
-      });
-      await _install();
-    } on UpdateException catch (e) {
-      if (mounted) setState(() => _stage = _Stage.idle);
-      _say(e.message, error: true);
-    } catch (e) {
-      if (mounted) setState(() => _stage = _Stage.idle);
-      _say('The download failed — $e', error: true);
-    }
+    final file = await state.downloadUpdate();
+    if (!mounted || file == null) return;
+    await _install(file);
   }
 
-  Future<void> _install() async {
-    final file = _downloaded;
-    if (file == null) return;
+  Future<void> _install(File file) async {
     final service = context.read<AppState>().updates;
     try {
       await service.install(file);

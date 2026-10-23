@@ -153,6 +153,15 @@ class MediaItem {
   /// Per-item headers (`User-Agent`, `Referer`) parsed from `#EXTVLCOPT`.
   final Map<String, String> httpHeaders;
 
+  /// Stands in for an entry saved before the whole item was stored: it keeps
+  /// the id alive so the favourite is not dropped, and is replaced the first
+  /// time a catalog containing that id loads. It has no URL, so it is never
+  /// offered for playback as-is.
+  factory MediaItem.placeholder(String id) =>
+      MediaItem(id: id, name: id, url: '', kind: MediaKind.live);
+
+  bool get isPlayable => url.isNotEmpty;
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,

@@ -36,6 +36,28 @@ class AppRelease {
   int? get assetBytes => Platform.isAndroid ? apkBytes : windowsBytes;
 }
 
+enum DownloadState { idle, running, done, failed }
+
+/// A snapshot of the Android foreground-service download.
+class BackgroundDownload {
+  const BackgroundDownload({
+    required this.state,
+    this.progress = 0,
+    this.path,
+    this.error,
+  });
+
+  const BackgroundDownload.idle() : this(state: DownloadState.idle);
+
+  final DownloadState state;
+  final double progress;
+  final String? path;
+  final String? error;
+
+  bool get isRunning => state == DownloadState.running;
+  File? get file => path == null ? null : File(path!);
+}
+
 class UpdateException implements Exception {
   UpdateException(this.message);
   final String message;
@@ -242,6 +264,60 @@ class UpdateService {
     throw UpdateException(
       'Installing updates is not supported on ${Platform.operatingSystem}.',
     );
+  }
+
+  // --- Background download (Android) ---------------------------------------
+
+  /// Hands the transfer to a foreground service, which keeps running while
+  /// the app is in the background or closed and posts a progress
+  /// notification. When it finishes, tapping that notification opens the
+  /// installer without reopening the app.
+  Future<void> startBackgroundDownload(AppRelease release) async {
+    final url = release.apkUrl;
+    if (url == null) {
+      throw UpdateException('This release has no Android download.');
+    }
+    await _channel.invokeMethod<void>('requestNotificationPermission');
+    await _channel.invokeMethod<bool>('startBackgroundDownload', {
+      'url': url,
+      'name': Uri.parse(url).pathSegments.last,
+    });
+  }
+
+  /// What the service is doing, readable even after the app was killed and
+  /// restarted mid-download.
+  Future<BackgroundDownload> backgroundStatus() async {
+    if (!Platform.isAndroid) return const BackgroundDownload.idle();
+    try {
+      final data = await _channel.invokeMapMethod<String, Object?>(
+        'downloadStatus',
+      );
+      if (data == null) return const BackgroundDownload.idle();
+      return BackgroundDownload(
+        state: switch (data['state']) {
+          'running' => DownloadState.running,
+          'done' => DownloadState.done,
+          'failed' => DownloadState.failed,
+          _ => DownloadState.idle,
+        },
+        progress: ((data['progress'] as num?)?.toInt() ?? 0) / 100,
+        path: data['path'] as String?,
+        error: data['error'] as String?,
+      );
+    } on PlatformException {
+      return const BackgroundDownload.idle();
+    } on MissingPluginException {
+      return const BackgroundDownload.idle();
+    }
+  }
+
+  Future<void> clearBackgroundStatus() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('clearDownloadStatus');
+    } on PlatformException {
+      // Nothing to clear.
+    }
   }
 
   Future<bool> canRequestInstalls() async {

@@ -29,26 +29,55 @@ class LocalStore {
   File _file(String name) =>
       File('${_dir.path}${Platform.pathSeparator}$name');
 
+  /// Reads a file, falling back to the previous copy.
+  ///
+  /// Returning null here means "no data", and the caller turns that into an
+  /// empty set which the next write then makes permanent — so a file that is
+  /// merely unreadable for a moment must not reach that path. The `.bak`
+  /// companion makes losing anything take two failures instead of one.
   Future<Object?> _readJson(String name) async {
-    final file = _file(name);
-    if (!await file.exists()) return null;
-    try {
-      final text = await file.readAsString();
-      if (text.trim().isEmpty) return null;
-      return jsonDecode(text);
-    } catch (_) {
-      // A truncated or hand-edited file should not block startup.
-      return null;
+    for (final candidate in [_file(name), _file('$name.bak')]) {
+      if (!await candidate.exists()) continue;
+      try {
+        final text = await candidate.readAsString();
+        if (text.trim().isEmpty) continue;
+        return jsonDecode(text);
+      } catch (_) {
+        // Truncated or hand-edited: try the backup rather than giving up.
+        continue;
+      }
     }
+    return null;
   }
 
   Future<void> _writeJson(String name, Object value) async {
-    // Write to a sibling first so a crash mid-write cannot leave a half file.
     final target = _file(name);
     final temp = _file('$name.tmp');
+    final backup = _file('$name.bak');
+
+    // Write beside the target first, so a crash mid-write cannot truncate it.
     await temp.writeAsString(jsonEncode(value), flush: true);
-    if (await target.exists()) await target.delete();
-    await temp.rename(target.path);
+
+    // Keep the last known-good copy before replacing it.
+    if (await target.exists()) {
+      try {
+        await target.copy(backup.path);
+      } catch (_) {
+        // A missing backup is survivable; a failed write is not.
+      }
+    }
+
+    try {
+      // On POSIX this replaces the target atomically, so there is never a
+      // moment with no file - which is exactly when installing an update
+      // kills the process.
+      await temp.rename(target.path);
+    } on FileSystemException {
+      // Windows refuses to rename onto an existing file, so there it has to
+      // be a delete first. The backup above covers that window.
+      if (await target.exists()) await target.delete();
+      await temp.rename(target.path);
+    }
   }
 
   // --- Sources -------------------------------------------------------------
@@ -68,23 +97,40 @@ class LocalStore {
 
   // --- Favourites and history ---------------------------------------------
 
-  Future<Set<String>> readFavorites() async {
-    final data = await _readJson('favorites.json');
-    if (data is! List) return {};
-    return data.whereType<String>().toSet();
-  }
+  /// Favourites and history store the whole item, not just its id.
+  ///
+  /// Ids alone meant the lists could only be shown by matching them against a
+  /// loaded catalog, so they looked empty whenever the catalog was still
+  /// loading, had failed, or had been cleared — which reads exactly like the
+  /// data having been lost.
+  Future<List<MediaItem>> readFavorites() => _readItems('favorites.json');
 
-  Future<void> writeFavorites(Set<String> ids) =>
-      _writeJson('favorites.json', ids.toList());
+  Future<void> writeFavorites(List<MediaItem> items) =>
+      _writeItems('favorites.json', items);
 
-  Future<List<String>> readRecents() async {
-    final data = await _readJson('recents.json');
+  Future<List<MediaItem>> readRecents() => _readItems('recents.json');
+
+  Future<void> writeRecents(List<MediaItem> items) =>
+      _writeItems('recents.json', items);
+
+  Future<List<MediaItem>> _readItems(String name) async {
+    final data = await _readJson(name);
     if (data is! List) return [];
-    return data.whereType<String>().toList();
+    final out = <MediaItem>[];
+    for (final entry in data) {
+      if (entry is Map) {
+        out.add(MediaItem.fromJson(entry.cast<String, dynamic>()));
+      } else if (entry is String) {
+        // Written before 1.4, when only ids were stored. Keep the entry so it
+        // is not dropped; it is filled in the first time the catalog loads.
+        out.add(MediaItem.placeholder(entry));
+      }
+    }
+    return out;
   }
 
-  Future<void> writeRecents(List<String> ids) =>
-      _writeJson('recents.json', ids);
+  Future<void> _writeItems(String name, List<MediaItem> items) =>
+      _writeJson(name, items.map((e) => e.toJson()).toList());
 
   // --- Watch progress ------------------------------------------------------
 
