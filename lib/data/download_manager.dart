@@ -28,6 +28,17 @@ class DownloadManager extends ChangeNotifier {
   var _cancelRequested = false;
   var _loaded = false;
 
+  /// Set while something is playing.
+  ///
+  /// IPTV accounts are often capped at a single simultaneous connection, and
+  /// a download holds it — so with one running, nothing plays at all and the
+  /// server answers every stream request with a refusal. Downloads stand
+  /// aside for playback and pick up where they stopped afterwards.
+  var _suspended = false;
+  String? _userAgent;
+
+  bool get isSuspended => _suspended;
+
   List<DownloadRecord> get records => _records.values.toList();
   bool get isEmpty => _records.isEmpty;
   bool get hasActive => _records.values.any((r) => r.isActive);
@@ -124,10 +135,40 @@ class DownloadManager extends ChangeNotifier {
     unawaited(_pump(userAgent: userAgent));
   }
 
+  // --- Playback takes priority ---------------------------------------------
+
+  /// Stops the running transfer so playback can have the connection. What has
+  /// arrived is kept, and resumes from that byte afterwards.
+  void suspendForPlayback() {
+    if (_suspended) return;
+    _suspended = true;
+    if (_activeId != null) {
+      _cancelRequested = true;
+      // Back to queued, not failed: this is a pause, not an error.
+      final record = _records[_activeId];
+      if (record != null) {
+        _records[_activeId!] = record.copyWith(
+          state: DownloadState.queued,
+          clearError: true,
+        );
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Picks downloading back up once nothing is playing.
+  void resumeAfterPlayback() {
+    if (!_suspended) return;
+    _suspended = false;
+    notifyListeners();
+    unawaited(_pump(userAgent: _userAgent));
+  }
+
   // --- Transfer ------------------------------------------------------------
 
   Future<void> _pump({String? userAgent}) async {
-    if (_activeId != null) return;
+    if (userAgent != null) _userAgent = userAgent;
+    if (_activeId != null || _suspended) return;
 
     final next = _records.values
         .where((r) => r.state == DownloadState.queued)
@@ -192,7 +233,10 @@ class DownloadManager extends ChangeNotifier {
       var lastPercent = -1;
 
       await for (final chunk in response.stream) {
-        if (_cancelRequested || !_records.containsKey(id)) {
+        // Cancelled, removed, or standing aside for playback. In every case
+        // the .part file stays, so the next attempt resumes from here.
+        if (_cancelRequested || _suspended || !_records.containsKey(id)) {
+          await out.flush();
           await out.close();
           sink = null;
           return;

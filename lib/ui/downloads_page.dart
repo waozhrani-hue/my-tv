@@ -34,21 +34,78 @@ class DownloadsView extends StatelessWidget {
       ...records.where((r) => r.isComplete),
     ];
 
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 16),
-      itemCount: sorted.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 2),
-      itemBuilder: (context, index) =>
-          _DownloadRow(record: sorted[index], onPlay: onPlay),
+    final paused = state.downloads.isSuspended && records.any((r) => r.isActive);
+
+    return Column(
+      children: [
+        if (paused) const _PausedBanner(),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(8, 6, 8, 16),
+            itemCount: sorted.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 2),
+            itemBuilder: (context, index) => _DownloadRow(
+              record: sorted[index],
+              onPlay: onPlay,
+              paused: paused,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Explains a download that is sitting still, rather than letting it look
+/// broken.
+class _PausedBanner extends StatelessWidget {
+  const _PausedBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(10, 8, 10, 2),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: scheme.primary.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.pause_circle_outline_rounded, size: 19, color: scheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Paused while something is playing. Most IPTV accounts allow '
+              'one connection at a time, so downloading would stop playback '
+              'working. It carries on from here when you close the player.',
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.45,
+                color: scheme.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _DownloadRow extends StatelessWidget {
-  const _DownloadRow({required this.record, required this.onPlay});
+  const _DownloadRow({
+    required this.record,
+    required this.onPlay,
+    this.paused = false,
+  });
 
   final DownloadRecord record;
   final ValueChanged<MediaItem> onPlay;
+
+  /// Standing aside for playback, rather than genuinely waiting its turn.
+  final bool paused;
 
   @override
   Widget build(BuildContext context) {
@@ -91,7 +148,10 @@ class _DownloadRow extends StatelessWidget {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          _subtitle(record),
+                          paused && record.isActive
+                              ? 'Paused · ${formatBytes(record.receivedBytes)} '
+                                    'saved so far'
+                              : _subtitle(record),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -140,8 +200,11 @@ class _DownloadRow extends StatelessWidget {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(3),
                   child: LinearProgressIndicator(
-                    // Indeterminate until the server reports a size.
-                    value: record.totalBytes > 0 ? record.fraction : null,
+                    // A paused bar holds its position; otherwise it is
+                    // indeterminate until the server reports a size.
+                    value: paused || record.totalBytes > 0
+                        ? record.fraction
+                        : null,
                     minHeight: 4,
                   ),
                 ),

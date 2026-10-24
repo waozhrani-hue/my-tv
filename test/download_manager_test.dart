@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -202,6 +201,44 @@ void main() {
     await second.load();
     expect(second.recordFor(film.id), isNull);
     second.dispose();
+  });
+
+  test('playback suspends downloading and resuming picks it back up', () async {
+    final manager = managerServing(payload);
+    await manager.load();
+
+    // A provider that allows one connection cannot do both at once.
+    manager.suspendForPlayback();
+    expect(manager.isSuspended, isTrue);
+
+    await manager.enqueue(film, userAgent: 'Test/1.0');
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(
+      manager.recordFor(film.id)!.state,
+      DownloadState.queued,
+      reason: 'nothing may transfer while something is playing',
+    );
+    expect(manager.localPathFor(film.id), isNull);
+
+    manager.resumeAfterPlayback();
+    expect(manager.isSuspended, isFalse);
+    await settle(manager);
+
+    expect(manager.recordFor(film.id)!.state, DownloadState.completed);
+    manager.dispose();
+  });
+
+  test('a suspended download is queued, not failed', () async {
+    final manager = managerServing(payload);
+    await manager.load();
+    manager.suspendForPlayback();
+    await manager.enqueue(film, userAgent: 'Test/1.0');
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+
+    final record = manager.recordFor(film.id)!;
+    expect(record.state, DownloadState.queued);
+    expect(record.error, isNull, reason: 'a pause is not an error');
+    manager.dispose();
   });
 
   test('bytesOnDisk counts only what finished', () async {

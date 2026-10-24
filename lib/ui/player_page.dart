@@ -94,6 +94,10 @@ class _PlayerPageState extends State<PlayerPage> {
     _activeTrack = _player.state.track;
     _volume = _player.state.volume;
 
+    // A provider that allows one connection at a time gives it to whichever
+    // asks first, so a running download would leave nothing to play with.
+    _app.downloads.suspendForPlayback();
+
     _listen();
     _applyNativeOptions(settings);
     _open(_item);
@@ -231,6 +235,7 @@ class _PlayerPageState extends State<PlayerPage> {
     }
     _focus.dispose();
     _player.dispose();
+    _app.downloads.resumeAfterPlayback();
     WakelockPlus.disable();
     // Leaving the player must not leave the shell in fullscreen.
     if (_fullscreen) _exitFullscreenChrome();
