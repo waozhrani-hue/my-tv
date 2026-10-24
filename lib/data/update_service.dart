@@ -36,7 +36,7 @@ class AppRelease {
   int? get assetBytes => Platform.isAndroid ? apkBytes : windowsBytes;
 }
 
-enum DownloadState { idle, running, done, failed }
+enum UpdateDownloadState { idle, running, done, failed }
 
 /// A snapshot of the Android foreground-service download.
 class BackgroundDownload {
@@ -47,14 +47,14 @@ class BackgroundDownload {
     this.error,
   });
 
-  const BackgroundDownload.idle() : this(state: DownloadState.idle);
+  const BackgroundDownload.idle() : this(state: UpdateDownloadState.idle);
 
-  final DownloadState state;
+  final UpdateDownloadState state;
   final double progress;
   final String? path;
   final String? error;
 
-  bool get isRunning => state == DownloadState.running;
+  bool get isRunning => state == UpdateDownloadState.running;
   File? get file => path == null ? null : File(path!);
 }
 
@@ -295,10 +295,10 @@ class UpdateService {
       if (data == null) return const BackgroundDownload.idle();
       return BackgroundDownload(
         state: switch (data['state']) {
-          'running' => DownloadState.running,
-          'done' => DownloadState.done,
-          'failed' => DownloadState.failed,
-          _ => DownloadState.idle,
+          'running' => UpdateDownloadState.running,
+          'done' => UpdateDownloadState.done,
+          'failed' => UpdateDownloadState.failed,
+          _ => UpdateDownloadState.idle,
         },
         progress: ((data['progress'] as num?)?.toInt() ?? 0) / 100,
         path: data['path'] as String?,

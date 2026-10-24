@@ -351,6 +351,91 @@ class Settings {
   }
 }
 
+/// Where a saved-for-offline item is in its transfer.
+enum DownloadState { queued, running, completed, failed }
+
+/// A film kept on the device so it plays with no network — on a flight, or
+/// anywhere the connection is not worth trusting.
+class DownloadRecord {
+  const DownloadRecord({
+    required this.item,
+    required this.path,
+    this.state = DownloadState.queued,
+    this.receivedBytes = 0,
+    this.totalBytes = 0,
+    this.error,
+    this.completedAt,
+  });
+
+  final MediaItem item;
+
+  /// Absolute path to the finished file. While it is still arriving the bytes
+  /// live beside it under the same name with `.part` appended.
+  final String path;
+  final DownloadState state;
+  final int receivedBytes;
+  final int totalBytes;
+  final String? error;
+  final DateTime? completedAt;
+
+  bool get isComplete => state == DownloadState.completed;
+  bool get isActive =>
+      state == DownloadState.queued || state == DownloadState.running;
+
+  /// 0..1, or 0 while the size is still unknown.
+  double get fraction => totalBytes <= 0
+      ? 0
+      : (receivedBytes / totalBytes).clamp(0.0, 1.0);
+
+  DownloadRecord copyWith({
+    DownloadState? state,
+    int? receivedBytes,
+    int? totalBytes,
+    String? error,
+    DateTime? completedAt,
+    bool clearError = false,
+  }) {
+    return DownloadRecord(
+      item: item,
+      path: path,
+      state: state ?? this.state,
+      receivedBytes: receivedBytes ?? this.receivedBytes,
+      totalBytes: totalBytes ?? this.totalBytes,
+      error: clearError ? null : (error ?? this.error),
+      completedAt: completedAt ?? this.completedAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'item': item.toJson(),
+    'path': path,
+    'state': state.name,
+    'receivedBytes': receivedBytes,
+    'totalBytes': totalBytes,
+    'error': error,
+    'completedAt': completedAt?.toIso8601String(),
+  };
+
+  static DownloadRecord fromJson(Map<String, dynamic> json) {
+    return DownloadRecord(
+      item: MediaItem.fromJson(
+        (json['item'] as Map).cast<String, dynamic>(),
+      ),
+      path: json['path'] as String? ?? '',
+      // Anything caught mid-transfer by a restart is resumable, not running.
+      state: switch (json['state']) {
+        'completed' => DownloadState.completed,
+        'failed' => DownloadState.failed,
+        _ => DownloadState.queued,
+      },
+      receivedBytes: (json['receivedBytes'] as num?)?.toInt() ?? 0,
+      totalBytes: (json['totalBytes'] as num?)?.toInt() ?? 0,
+      error: json['error'] as String?,
+      completedAt: DateTime.tryParse(json['completedAt'] as String? ?? ''),
+    );
+  }
+}
+
 /// How far into a film the viewer got. Live channels have no meaningful
 /// position, so only [MediaKind.movie] items are tracked.
 class WatchProgress {

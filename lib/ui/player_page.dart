@@ -173,13 +173,16 @@ class _PlayerPageState extends State<PlayerPage> {
         ? _app.progressFor(item.id)?.position
         : null;
 
+    // A saved copy plays from the device, so a film opened on a flight needs
+    // no network at all.
+    final playable = _app.playableFor(item);
     final headers = <String, String>{
       'User-Agent': _app.settings.userAgent,
-      ...item.httpHeaders,
+      ...playable.httpHeaders,
     };
 
     try {
-      await _player.open(Media(item.url, httpHeaders: headers));
+      await _player.open(Media(playable.url, httpHeaders: headers));
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }

@@ -132,6 +132,20 @@ class LocalStore {
   Future<void> _writeItems(String name, List<MediaItem> items) =>
       _writeJson(name, items.map((e) => e.toJson()).toList());
 
+  // --- Downloads -----------------------------------------------------------
+
+  Future<List<DownloadRecord>> readDownloads() async {
+    final data = await _readJson('downloads.json');
+    if (data is! List) return [];
+    return data
+        .whereType<Map>()
+        .map((e) => DownloadRecord.fromJson(e.cast<String, dynamic>()))
+        .toList();
+  }
+
+  Future<void> writeDownloads(List<DownloadRecord> records) =>
+      _writeJson('downloads.json', records.map((e) => e.toJson()).toList());
+
   // --- Watch progress ------------------------------------------------------
 
   Future<Map<String, WatchProgress>> readProgress() async {

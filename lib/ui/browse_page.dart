@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../data/models.dart';
 import '../state/app_state.dart';
 import 'add_source_page.dart';
+import 'downloads_page.dart';
 import 'player_page.dart';
 import 'settings_page.dart';
 import 'theme.dart';
@@ -13,6 +14,7 @@ enum BrowseSection {
   live('Live TV', Icons.live_tv_rounded),
   movies('Movies', Icons.movie_outlined),
   favorites('Favourites', Icons.star_rounded),
+  downloads('Downloads', Icons.download_rounded),
   recent('Recent', Icons.history_rounded);
 
   const BrowseSection(this.label, this.icon);
@@ -75,6 +77,10 @@ class _BrowsePageState extends State<BrowsePage> {
     BrowseSection.live,
     if (state.catalog.movies.isNotEmpty) BrowseSection.movies,
     BrowseSection.favorites,
+    // Always offered once something is saved, so it can be reached with no
+    // network at all - which is the whole point of it.
+    if (state.catalog.movies.isNotEmpty || !state.downloads.isEmpty)
+      BrowseSection.downloads,
     BrowseSection.recent,
   ];
 
@@ -349,7 +355,9 @@ class _BrowsePageState extends State<BrowsePage> {
     return switch (_section) {
       BrowseSection.live => state.catalog.groupsOf(MediaKind.live),
       BrowseSection.movies => state.catalog.groupsOf(MediaKind.movie),
-      BrowseSection.favorites || BrowseSection.recent => const [],
+      BrowseSection.favorites ||
+      BrowseSection.recent ||
+      BrowseSection.downloads => const [],
     };
   }
 
@@ -371,10 +379,18 @@ class _BrowsePageState extends State<BrowsePage> {
       ),
       BrowseSection.favorites => state.favoriteItems.where(matches).toList(),
       BrowseSection.recent => state.recentItems.where(matches).toList(),
+      // Rendered by DownloadsView, which reads the manager directly.
+      BrowseSection.downloads => const [],
     };
   }
 
   Widget _content(AppState state) {
+    // Downloads are on the device, so they show whatever the playlist is
+    // doing - including when it has failed to load for want of a network.
+    if (_section == BrowseSection.downloads) {
+      return DownloadsView(onPlay: _play);
+    }
+
     switch (state.status) {
       case LoadStatus.loading:
         return const LoadingView(label: 'Loading playlist…');
@@ -802,6 +818,8 @@ class _ItemList extends StatelessWidget {
                             : Colors.white.withValues(alpha: 0.35),
                       ),
                     ),
+                    if (item.kind == MediaKind.movie)
+                      _SaveOfflineButton(item: item),
                     if (onRemove case final remove?)
                       IconButton(
                         onPressed: () => remove(item.id),
@@ -937,6 +955,47 @@ class _ItemGrid extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// Saves a film to the device, and then shows that it is saved.
+class _SaveOfflineButton extends StatelessWidget {
+  const _SaveOfflineButton({required this.item});
+
+  final MediaItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+    final record = state.downloads.recordFor(item.id);
+    final scheme = Theme.of(context).colorScheme;
+
+    if (record != null && record.isActive) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(
+            value: record.totalBytes > 0 ? record.fraction : null,
+            strokeWidth: 2.2,
+          ),
+        ),
+      );
+    }
+
+    final saved = record?.isComplete ?? false;
+    return IconButton(
+      tooltip: saved ? 'Saved on this device' : 'Save for offline',
+      onPressed: saved ? null : () => state.downloadItem(item),
+      icon: Icon(
+        saved
+            ? Icons.offline_pin_rounded
+            : Icons.download_for_offline_outlined,
+        size: 20,
+        color: saved ? scheme.primary : Colors.white.withValues(alpha: 0.35),
+      ),
     );
   }
 }

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../data/download_manager.dart';
 import '../data/local_store.dart';
 import '../data/models.dart';
 import '../data/repository.dart';
@@ -14,12 +15,24 @@ enum LoadStatus { idle, loading, ready, error }
 /// catalog of whichever one is selected, and the user's favourites, history
 /// and settings.
 class AppState extends ChangeNotifier {
-  AppState(this._store, this._repository, {UpdateService? updates})
-    : _updates = updates ?? UpdateService();
+  AppState(
+    this._store,
+    this._repository, {
+    UpdateService? updates,
+    DownloadManager? downloads,
+  }) : _updates = updates ?? UpdateService(),
+       downloads = downloads ?? DownloadManager(_store) {
+    // The download list is its own notifier; forward it so any screen
+    // watching AppState sees progress without subscribing separately.
+    this.downloads.addListener(notifyListeners);
+  }
 
   final LocalStore _store;
   final Repository _repository;
   final UpdateService _updates;
+
+  /// Films kept on the device for offline playback.
+  final DownloadManager downloads;
 
   /// Most recent items kept in history.
   static const _recentLimit = 40;
@@ -63,9 +76,10 @@ class AppState extends ChangeNotifier {
     _settings = await _store.readSettings();
     _booted = true;
 
-    // Neither is awaited: an update check must never hold up the first screen.
+    // None of these is awaited: they must never hold up the first screen.
     unawaited(checkForUpdate());
     unawaited(syncBackgroundDownload());
+    unawaited(downloads.load());
 
     final wanted = _settings.lastSourceId;
     final start = _sources.firstWhereOrNull((s) => s.id == wanted) ??
@@ -402,18 +416,18 @@ class AppState extends ChangeNotifier {
     if (!Platform.isAndroid) return;
     final status = await _updates.backgroundStatus();
     switch (status.state) {
-      case DownloadState.running:
+      case UpdateDownloadState.running:
         _downloading = true;
         _downloadProgress = status.progress;
         _watchBackgroundDownload();
-      case DownloadState.done:
+      case UpdateDownloadState.done:
         _downloading = false;
         _downloadProgress = 1;
         _downloadedUpdate = status.file;
-      case DownloadState.failed:
+      case UpdateDownloadState.failed:
         _downloading = false;
         _downloadError = status.error;
-      case DownloadState.idle:
+      case UpdateDownloadState.idle:
         return;
     }
     notifyListeners();
@@ -428,19 +442,19 @@ class AppState extends ChangeNotifier {
     ) async {
       final status = await _updates.backgroundStatus();
       switch (status.state) {
-        case DownloadState.running:
+        case UpdateDownloadState.running:
           if ((status.progress - _downloadProgress).abs() < 0.005) return;
           _downloadProgress = status.progress;
-        case DownloadState.done:
+        case UpdateDownloadState.done:
           timer.cancel();
           _downloading = false;
           _downloadProgress = 1;
           _downloadedUpdate = status.file;
-        case DownloadState.failed:
+        case UpdateDownloadState.failed:
           timer.cancel();
           _downloading = false;
           _downloadError = status.error ?? 'The download failed.';
-        case DownloadState.idle:
+        case UpdateDownloadState.idle:
           timer.cancel();
           _downloading = false;
       }
@@ -451,8 +465,36 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _downloadPoll?.cancel();
+    downloads.removeListener(notifyListeners);
+    downloads.dispose();
     super.dispose();
   }
+
+  // --- Offline downloads ---------------------------------------------------
+
+  /// Saves a film to the device. Live channels are not offered.
+  Future<void> downloadItem(MediaItem item) =>
+      downloads.enqueue(item, userAgent: _settings.userAgent);
+
+  Future<void> retryDownload(String id) =>
+      downloads.retry(id, userAgent: _settings.userAgent);
+
+  /// The on-device copy when there is one, so playback can skip the network.
+  MediaItem playableFor(MediaItem item) {
+    final path = downloads.localPathFor(item.id);
+    if (path == null) return item;
+    return MediaItem(
+      id: item.id,
+      name: item.name,
+      url: Uri.file(path).toString(),
+      kind: item.kind,
+      logo: item.logo,
+      group: item.group,
+      tvgId: item.tvgId,
+    );
+  }
+
+  bool isDownloaded(String id) => downloads.localPathFor(id) != null;
 
   /// Fetches the pending release. Safe to call again while one is running:
   /// the second call returns the same work rather than starting a parallel
