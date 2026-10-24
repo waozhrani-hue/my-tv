@@ -184,6 +184,42 @@ class AppState extends ChangeNotifier {
     await _saveSettings(_settings.copyWith(lastPlayedId: item.id));
   }
 
+  /// Forgets everything watched. Favourites and resume positions are kept;
+  /// each is cleared on its own.
+  Future<void> clearRecents() async {
+    if (_recents.isEmpty) return;
+    _recents = const [];
+    notifyListeners();
+    await _store.writeRecents(const []);
+  }
+
+  /// Drops a single entry from the history.
+  Future<void> removeRecent(String id) async {
+    if (!_recents.any((e) => e.id == id)) return;
+    _recents = _recents.where((e) => e.id != id).toList();
+    notifyListeners();
+    await _store.writeRecents(_recents);
+  }
+
+  Future<void> clearFavorites() async {
+    if (_favorites.isEmpty) return;
+    _favorites = const {};
+    notifyListeners();
+    await _store.writeFavorites(const []);
+  }
+
+  /// Forgets where every film was left off, so they all start from the top.
+  Future<void> clearAllProgress() async {
+    if (_progress.isEmpty) return;
+    _progress = const {};
+    notifyListeners();
+    await _store.writeProgress(const {});
+  }
+
+  int get recentCount => _recents.length;
+  int get favoriteCount => _favorites.length;
+  int get progressCount => _progress.length;
+
   /// Favourites, preferring the catalog's copy when it is loaded so the URL
   /// and artwork are current, and otherwise the saved one.
   List<MediaItem> get favoriteItems => [

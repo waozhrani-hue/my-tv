@@ -133,6 +133,42 @@ class SettingsPage extends StatelessWidget {
               ),
 
               const SizedBox(height: 28),
+              _SectionTitle('Stored data'),
+              _Card(
+                children: [
+                  _ClearTile(
+                    icon: Icons.history_rounded,
+                    title: 'Watch history',
+                    count: state.recentCount,
+                    unit: 'item',
+                    explanation:
+                        'Everything listed under Recent. Favourites and your '
+                        'places in films are kept.',
+                    onClear: state.clearRecents,
+                  ),
+                  const Divider(),
+                  _ClearTile(
+                    icon: Icons.play_circle_outline_rounded,
+                    title: 'Places in films',
+                    count: state.progressCount,
+                    unit: 'film',
+                    explanation:
+                        'Every film starts from the beginning again.',
+                    onClear: state.clearAllProgress,
+                  ),
+                  const Divider(),
+                  _ClearTile(
+                    icon: Icons.star_outline_rounded,
+                    title: 'Favourites',
+                    count: state.favoriteCount,
+                    unit: 'channel',
+                    explanation: 'Empties the Favourites section.',
+                    onClear: state.clearFavorites,
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 28),
               _SectionTitle('Updates'),
               const UpdateCard(),
 
@@ -168,6 +204,68 @@ class SettingsPage extends StatelessWidget {
   }
 
   static const _subtitleStyle = TextStyle(fontSize: 12.5, height: 1.4);
+}
+
+/// One row of stored data with a count and a way to clear it. Disabled when
+/// there is nothing to clear, so the count doubles as the answer to "is
+/// anything saved here".
+class _ClearTile extends StatelessWidget {
+  const _ClearTile({
+    required this.icon,
+    required this.title,
+    required this.count,
+    required this.unit,
+    required this.explanation,
+    required this.onClear,
+  });
+
+  final IconData icon;
+  final String title;
+  final int count;
+  final String unit;
+  final String explanation;
+  final Future<void> Function() onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final empty = count == 0;
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      subtitle: Text(
+        empty ? 'Nothing saved' : '$count ${count == 1 ? unit : '${unit}s'}',
+        style: const TextStyle(fontSize: 12.5),
+      ),
+      trailing: TextButton(
+        onPressed: empty ? null : () => _confirm(context),
+        child: const Text('Clear'),
+      ),
+    );
+  }
+
+  Future<void> _confirm(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Clear $title?'),
+        content: Text(
+          '$explanation\n\nThis cannot be undone.',
+          style: const TextStyle(height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await onClear();
+  }
 }
 
 class _SectionTitle extends StatelessWidget {

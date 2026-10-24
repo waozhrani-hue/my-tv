@@ -2,7 +2,7 @@ name: my_tv
 description: "My TV - an IPTV stream player for Windows and Android."
 publish_to: 'none'
 # Keep in step with AppInfo.version in lib/app_info.dart.
-version: 1.5.0+13
+version: 1.6.0+14
 
 environment:
   sdk: ^3.12.2

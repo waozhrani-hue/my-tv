@@ -247,6 +247,14 @@ class _BrowsePageState extends State<BrowsePage> {
             SizedBox(width: 280, child: _searchField()),
             const SizedBox(width: 4),
           ],
+          // Only shown where it applies, so it cannot be hit by accident in
+          // another section.
+          if (_section == BrowseSection.recent && state.recentCount > 0)
+            IconButton(
+              tooltip: 'Clear watch history',
+              onPressed: () => _confirmClearHistory(state),
+              icon: const Icon(Icons.delete_sweep_rounded),
+            ),
           if (state.availableUpdate case final update?)
             IconButton(
               tooltip: state.isDownloadingUpdate
@@ -301,6 +309,31 @@ class _BrowsePageState extends State<BrowsePage> {
         ],
       ),
     );
+  }
+
+  Future<void> _confirmClearHistory(AppState state) async {
+    final count = state.recentCount;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear watch history?'),
+        content: Text(
+          'Forgets the $count ${count == 1 ? 'item' : 'items'} under Recent. '
+          'Your favourites and your places in films are kept.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await state.clearRecents();
   }
 
   void _openSettings() {
@@ -387,7 +420,12 @@ class _BrowsePageState extends State<BrowsePage> {
         poster: _section == BrowseSection.movies,
       );
     }
-    return _ItemList(items: items, onPlay: _play);
+    return _ItemList(
+      items: items,
+      onPlay: _play,
+      // A single entry can be dropped from the history without clearing it.
+      onRemove: _section == BrowseSection.recent ? state.removeRecent : null,
+    );
   }
 
   /// Films and channels keep separate layout preferences. Favourites and
@@ -675,10 +713,17 @@ class _GroupChips extends StatelessWidget {
 // --- Item lists --------------------------------------------------------------
 
 class _ItemList extends StatelessWidget {
-  const _ItemList({required this.items, required this.onPlay});
+  const _ItemList({
+    required this.items,
+    required this.onPlay,
+    this.onRemove,
+  });
 
   final List<MediaItem> items;
   final ValueChanged<MediaItem> onPlay;
+
+  /// Set only in the history, where an entry can be dropped on its own.
+  final ValueChanged<String>? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -757,6 +802,16 @@ class _ItemList extends StatelessWidget {
                             : Colors.white.withValues(alpha: 0.35),
                       ),
                     ),
+                    if (onRemove case final remove?)
+                      IconButton(
+                        onPressed: () => remove(item.id),
+                        tooltip: 'Remove from history',
+                        icon: Icon(
+                          Icons.close_rounded,
+                          size: 19,
+                          color: Colors.white.withValues(alpha: 0.35),
+                        ),
+                      ),
                   ],
                     ),
                     if (state.progressFor(item.id) case final watched?)
