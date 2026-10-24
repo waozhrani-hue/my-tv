@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/models.dart';
+import '../data/xtream_link.dart';
 import '../state/app_state.dart';
+import 'pair_page.dart';
 
 enum SourceFormTab { m3u, xtream }
 
@@ -56,9 +58,34 @@ class _AddSourcePageState extends State<AddSourcePage>
 
   bool get _isEditing => widget.existing != null;
 
+  /// Splits a pasted provider link across the three fields.
+  ///
+  /// Providers hand out one URL that already carries the server, username and
+  /// password, so pasting it should be the whole job. A plain host is left
+  /// alone — this only fires when credentials are actually in there.
+  void _splitPastedLink() {
+    final raw = _host.text;
+    if (!XtreamLink.hasCredentials(raw)) return;
+    final link = XtreamLink.parse(raw);
+    if (link == null || !link.isComplete) return;
+
+    _host.value = TextEditingValue(
+      text: link.origin,
+      selection: TextSelection.collapsed(offset: link.origin.length),
+    );
+    _user.text = link.username!;
+    _pass.text = link.password!;
+    if (_name.text.trim().isEmpty) _name.text = Uri.parse(link.origin).host;
+    setState(() {
+      _message = 'Read the server, username and password from that link.';
+      _messageIsError = false;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    _host.addListener(_splitPastedLink);
     final existing = widget.existing;
     final startTab = existing != null
         ? (existing.kind == SourceKind.xtream
@@ -91,6 +118,7 @@ class _AddSourcePageState extends State<AddSourcePage>
 
   @override
   void dispose() {
+    _host.removeListener(_splitPastedLink);
     _tabs.dispose();
     for (final c in [_name, _url, _epg, _agent, _host, _user, _pass]) {
       c.dispose();
@@ -281,6 +309,8 @@ class _AddSourcePageState extends State<AddSourcePage>
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          const _PhoneEntryCard(),
+          const SizedBox(height: 18),
           _field(
             controller: _name,
             label: 'Name',
@@ -293,7 +323,7 @@ class _AddSourcePageState extends State<AddSourcePage>
           const SizedBox(height: 14),
           _field(
             controller: _host,
-            label: 'Server',
+            label: 'Server, or paste your whole provider link',
             hint: 'http://example.com:8080',
             icon: Icons.dns_rounded,
             focusNode: _hostFocus,
@@ -536,6 +566,70 @@ class _AddSourcePageState extends State<AddSourcePage>
 
   static String _date(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+}
+
+/// Offers the phone as a keyboard, which is the difference between a minute
+/// and five on a TV remote.
+class _PhoneEntryCard extends StatelessWidget {
+  const _PhoneEntryCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const PairPage()),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: scheme.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  Icons.qr_code_2_rounded,
+                  color: scheme.primary,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Type it on your phone instead',
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Scan a code and fill it in with a proper keyboard',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.35,
+                        color: Colors.white.withValues(alpha: 0.55),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, size: 22),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _FilePill extends StatelessWidget {

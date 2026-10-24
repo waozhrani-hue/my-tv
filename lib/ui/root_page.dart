@@ -5,6 +5,7 @@ import '../app_info.dart';
 import '../state/app_state.dart';
 import 'add_source_page.dart';
 import 'browse_page.dart';
+import 'pair_page.dart';
 import 'widgets/common.dart';
 
 /// Chooses between first-run onboarding and the channel browser.
@@ -78,6 +79,16 @@ class WelcomePage extends StatelessWidget {
                   title: 'Xtream Codes account',
                   subtitle: 'Server address with a username and password',
                   onTap: () => _open(context, SourceFormTab.xtream),
+                ),
+                const SizedBox(height: 12),
+                _Option(
+                  icon: Icons.phone_iphone_rounded,
+                  title: 'Type it on your phone',
+                  subtitle:
+                      'Scan a code and fill it in with a proper keyboard',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const PairPage()),
+                  ),
                 ),
               ],
             ),

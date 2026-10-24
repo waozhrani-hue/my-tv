@@ -17,6 +17,14 @@ the resource block is compiled in a Latin-1 codepage).
 
 - **Two source types** — an M3U/M3U8 playlist (by URL or from a local file) or
   an Xtream Codes account (server, username, password).
+- **Type it on your phone instead of with a remote.** The app serves a one-page
+  form on the local network and shows a QR code pointing at it; scan it, fill
+  it in with a real keyboard, and the playlist appears on the TV. The form is
+  gated by a four-digit code shown on screen, never leaves the LAN, and shuts
+  down the moment a playlist arrives or after five minutes.
+- **Paste a provider link** into the server field and the username and
+  password are read out of it — `get.php?username=…`, `player_api.php?…` and
+  stream URLs such as `/live/user/pass/1234.ts` are all understood.
 - **Several playlists** side by side, switched from the header menu.
 - **Live TV and Movies** — Xtream VOD alongside live channels.
 - **Grid or list**, switched from the header and remembered per section:
@@ -58,7 +66,7 @@ flutter pub get
 # Android — one APK that installs on any device, in
 # build/app/outputs/flutter-apk/app-release.apk
 flutter build apk --release
-pwsh tool/sign-apk.ps1          # adds the v1 signature; see below
+powershell -File tool/sign-apk.ps1   # adds the v1 signature; see below
 
 # Or smaller per-architecture APKs, if you know the target. Note these carry
 # an ABI offset in their versionCode (arm64 = +2000), so a later universal

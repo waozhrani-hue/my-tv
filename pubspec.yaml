@@ -2,7 +2,7 @@ name: my_tv
 description: "My TV - an IPTV stream player for Windows and Android."
 publish_to: 'none'
 # Keep in step with AppInfo.version in lib/app_info.dart.
-version: 1.4.5+12
+version: 1.5.0+13
 
 environment:
   sdk: ^3.12.2
@@ -28,6 +28,8 @@ dependencies:
   file_selector: ^1.1.0
   # 4.0.5+ pulls material_ui, which needs a newer Dart than this SDK ships.
   cached_network_image: ^4.0.3
+  # Renders the pairing QR offline; no network, no camera.
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:
