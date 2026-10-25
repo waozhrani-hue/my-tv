@@ -10,7 +10,7 @@
 ;   ISCC.exe installer\my-tv.iss
 
 #define AppName       "My TV"
-#define AppVersion    "1.7.1"
+#define AppVersion    "1.8.0"
 #define AppPublisher  "My TV"
 #define AppExe        "MyTV.exe"
 #define SourceDir     "..\build\windows\x64\runner\Release"

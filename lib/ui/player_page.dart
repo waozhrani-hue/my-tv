@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../data/models.dart';
 import '../state/app_state.dart';
+import 'theme.dart';
 import 'widgets/common.dart';
 
 /// Full-screen playback with its own controls. One [Player] is kept alive for
@@ -53,6 +54,14 @@ class _PlayerPageState extends State<PlayerPage> {
   var _burstForward = true;
   var _burstVisible = false;
   Offset? _lastTapPosition;
+
+  // The channel list that slides over the video. It keeps its own hide timer:
+  // a longer one than the controls, because reading a list takes longer than
+  // glancing at a progress bar.
+  static const _listHideDelay = Duration(seconds: 9);
+  Timer? _listTimer;
+  var _listVisible = false;
+  final _listScroll = ScrollController();
 
   var _controlsVisible = true;
   var _playing = false;
@@ -226,6 +235,8 @@ class _PlayerPageState extends State<PlayerPage> {
     _hideTimer?.cancel();
     _progressTimer?.cancel();
     _burstTimer?.cancel();
+    _listTimer?.cancel();
+    _listScroll.dispose();
     // Capture the final position before the player is torn down.
     if (_item.kind == MediaKind.movie && _duration > Duration.zero) {
       _app.saveProgress(_item, _position, _duration);
@@ -257,8 +268,77 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   void _toggleControls() {
+    // With the list open, a tap on the video dismisses it rather than
+    // toggling the controls underneath — the nearer thing wins.
+    if (_listVisible) {
+      _hideList();
+      return;
+    }
     setState(() => _controlsVisible = !_controlsVisible);
     if (_controlsVisible) _restartHideTimer();
+  }
+
+  // --- Channel list ---------------------------------------------------------
+
+  /// Everything that can be switched to from here: the current category, or
+  /// the whole section when the category holds only this one item.
+  List<MediaItem> get _listItems => _app.zapListFor(_item);
+
+  void _showList() {
+    // Nothing to switch between, so the panel would be an empty overlay.
+    if (_listVisible || _listItems.length < 2) return;
+    setState(() {
+      _listVisible = true;
+      _controlsVisible = true;
+    });
+    _restartListTimer();
+    _restartHideTimer();
+    // Open on the channel being watched rather than at the top of 16,000.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent());
+  }
+
+  void _hideList() {
+    if (!_listVisible) return;
+    _listTimer?.cancel();
+    setState(() => _listVisible = false);
+    _restartHideTimer();
+  }
+
+  void _toggleList() => _listVisible ? _hideList() : _showList();
+
+  void _restartListTimer() {
+    _listTimer?.cancel();
+    _listTimer = Timer(_listHideDelay, () {
+      if (mounted && _playing) _hideList();
+    });
+  }
+
+  void _scrollToCurrent() {
+    if (!_listScroll.hasClients) return;
+    final index = _listItems.indexWhere((e) => e.id == _item.id);
+    if (index < 0) return;
+    const rowHeight = _ChannelList.rowHeight;
+    final viewport = _listScroll.position.viewportDimension;
+    final target = (index * rowHeight) - (viewport / 2) + (rowHeight / 2);
+    _listScroll.jumpTo(
+      target.clamp(0.0, _listScroll.position.maxScrollExtent),
+    );
+  }
+
+  /// Switches without leaving playback, which is the point of the list.
+  void _playFromList(MediaItem item) {
+    _restartListTimer();
+    if (item.id == _item.id) {
+      _hideList();
+      return;
+    }
+    _recordProgress();
+    setState(() => _item = item);
+    _open(item);
+    // Let the new name register, then get out of the way.
+    Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) _hideList();
+    });
   }
 
   // --- Playback actions -----------------------------------------------------
@@ -398,9 +478,22 @@ class _PlayerPageState extends State<PlayerPage> {
       case LogicalKeyboardKey.mediaPlayPause:
         _togglePlay();
       case LogicalKeyboardKey.arrowRight:
-        _skip(forward: true);
+        if (_listVisible) {
+          _hideList();
+        } else {
+          _skip(forward: true);
+        }
       case LogicalKeyboardKey.arrowLeft:
-        _skip(forward: false);
+        // On a remote the left edge is where the list lives, so pressing
+        // into it opens the list rather than seeking.
+        if (!_listVisible && _listItems.length > 1 && _isLive) {
+          _showList();
+        } else if (_listVisible) {
+          // Already open: leave the arrows to the list's own focus.
+          _restartListTimer();
+        } else {
+          _skip(forward: false);
+        }
       case LogicalKeyboardKey.arrowUp:
         _setVolume(_volume + 5);
       case LogicalKeyboardKey.arrowDown:
@@ -409,8 +502,17 @@ class _PlayerPageState extends State<PlayerPage> {
         _toggleFullscreen();
       case LogicalKeyboardKey.keyM:
         _toggleMute();
+      case LogicalKeyboardKey.keyL:
+      case LogicalKeyboardKey.contextMenu:
+        _toggleList();
       case LogicalKeyboardKey.escape:
-        _close();
+        // Closes the list first, then fullscreen, then the player: one step
+        // back at a time rather than dropping out of everything at once.
+        if (_listVisible) {
+          _hideList();
+        } else {
+          _close();
+        }
       case LogicalKeyboardKey.keyN:
       case LogicalKeyboardKey.pageUp:
       case LogicalKeyboardKey.channelUp:
@@ -430,9 +532,16 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !_fullscreen,
+      // Back peels off one layer at a time: the list, then fullscreen, then
+      // the player itself.
+      canPop: !_fullscreen && !_listVisible,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _fullscreen) _toggleFullscreen();
+        if (didPop) return;
+        if (_listVisible) {
+          _hideList();
+        } else if (_fullscreen) {
+          _toggleFullscreen();
+        }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -453,6 +562,16 @@ class _PlayerPageState extends State<PlayerPage> {
                     onTap: _toggleControls,
                     onDoubleTapDown: (d) => _lastTapPosition = d.localPosition,
                     onDoubleTap: () => _handleDoubleTap(constraints.maxWidth),
+                    // A swipe in from the left edge opens the list; a swipe
+                    // back out closes it.
+                    onHorizontalDragEnd: (details) {
+                      final v = details.primaryVelocity ?? 0;
+                      if (v > 320 && !_listVisible && _listItems.length > 1) {
+                        _showList();
+                      } else if (v < -320 && _listVisible) {
+                        _hideList();
+                      }
+                    },
                     behavior: HitTestBehavior.opaque,
                     child: ColoredBox(
                       color: Colors.black,
@@ -485,6 +604,16 @@ class _PlayerPageState extends State<PlayerPage> {
                     ignoring: !_controlsVisible,
                     child: _controlsLayer(),
                   ),
+                ),
+                _ChannelList(
+                  visible: _listVisible,
+                  items: _listItems,
+                  currentId: _item.id,
+                  controller: _listScroll,
+                  isFavorite: _app.isFavorite,
+                  onSelected: _playFromList,
+                  onClose: _hideList,
+                  onInteract: _restartListTimer,
                 ),
               ],
             ),
@@ -530,6 +659,8 @@ class _PlayerPageState extends State<PlayerPage> {
           subtitle: _item.group,
           isLive: _isLive,
           onBack: _close,
+          onShowList: _listItems.length > 1 ? _toggleList : null,
+          listOpen: _listVisible,
           trailing: _TrackMenus(
             tracks: _tracks,
             active: _activeTrack,
@@ -654,6 +785,8 @@ class _TopBar extends StatelessWidget {
     required this.isLive,
     required this.onBack,
     required this.trailing,
+    this.onShowList,
+    this.listOpen = false,
   });
 
   final String title;
@@ -661,6 +794,10 @@ class _TopBar extends StatelessWidget {
   final bool isLive;
   final VoidCallback onBack;
   final Widget trailing;
+
+  /// Null when there is nothing else in this category to switch to.
+  final VoidCallback? onShowList;
+  final bool listOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -724,8 +861,255 @@ class _TopBar extends StatelessWidget {
               ],
             ),
           ),
+          if (onShowList case final show?)
+            IconButton(
+              onPressed: show,
+              tooltip: listOpen ? 'Hide the list (L)' : 'Show the list (L)',
+              icon: Icon(
+                listOpen
+                    ? Icons.playlist_remove_rounded
+                    : Icons.playlist_play_rounded,
+                color: Colors.white,
+              ),
+            ),
           trailing,
         ],
+      ),
+    );
+  }
+}
+
+/// The channel list that slides over the video while it keeps playing.
+///
+/// Dismissed by a tap on the video, Back, Escape, or on its own after a
+/// while — picking the next thing to watch should not mean leaving what is
+/// already on.
+class _ChannelList extends StatelessWidget {
+  const _ChannelList({
+    required this.visible,
+    required this.items,
+    required this.currentId,
+    required this.controller,
+    required this.isFavorite,
+    required this.onSelected,
+    required this.onClose,
+    required this.onInteract,
+  });
+
+  static const rowHeight = 58.0;
+  static const _width = 340.0;
+
+  final bool visible;
+  final List<MediaItem> items;
+  final String currentId;
+  final ScrollController controller;
+  final bool Function(String id) isFavorite;
+  final ValueChanged<MediaItem> onSelected;
+  final VoidCallback onClose;
+  final VoidCallback onInteract;
+
+  @override
+  Widget build(BuildContext context) {
+    // Built even while hidden so it can animate in, so an empty catalog must
+    // not reach the panel — it indexes the list to find the current item.
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    final scheme = Theme.of(context).colorScheme;
+    final width = _width.clamp(0.0, MediaQuery.sizeOf(context).width * 0.86);
+
+    return Positioned.fill(
+      child: IgnorePointer(
+        ignoring: !visible,
+        child: Stack(
+          children: [
+            // Dimming the rest doubles as the tap target that closes it.
+            AnimatedOpacity(
+              opacity: visible ? 1 : 0,
+              duration: const Duration(milliseconds: 200),
+              child: GestureDetector(
+                onTap: onClose,
+                behavior: HitTestBehavior.opaque,
+                child: ColoredBox(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ),
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
+              left: visible ? 0 : -width,
+              top: 0,
+              bottom: 0,
+              width: width,
+              child: _Panel(
+                items: items,
+                currentId: currentId,
+                controller: controller,
+                isFavorite: isFavorite,
+                onSelected: onSelected,
+                onClose: onClose,
+                onInteract: onInteract,
+                accent: scheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Panel extends StatelessWidget {
+  const _Panel({
+    required this.items,
+    required this.currentId,
+    required this.controller,
+    required this.isFavorite,
+    required this.onSelected,
+    required this.onClose,
+    required this.onInteract,
+    required this.accent,
+  });
+
+  final List<MediaItem> items;
+  final String currentId;
+  final ScrollController controller;
+  final bool Function(String id) isFavorite;
+  final ValueChanged<MediaItem> onSelected;
+  final VoidCallback onClose;
+  final VoidCallback onInteract;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final group = items
+        .firstWhere(
+          (e) => e.id == currentId,
+          orElse: () => items.first,
+        )
+        .group;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.background.withValues(alpha: 0.93),
+        border: const Border(right: BorderSide(color: AppTheme.outline)),
+      ),
+      child: SafeArea(
+        right: false,
+        child: Listener(
+          // Any touch inside keeps it open; it only times out when ignored.
+          onPointerDown: (_) => onInteract(),
+          onPointerSignal: (_) => onInteract(),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 6, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            (group ?? '').trim().isEmpty
+                                ? 'Up next'
+                                : group!.trim(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            '${items.length} items',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: Colors.white.withValues(alpha: 0.45),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: onClose,
+                      tooltip: 'Close',
+                      icon: const Icon(Icons.close_rounded, size: 19),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.builder(
+                  controller: controller,
+                  // Fixed height is what lets the current row be scrolled to
+                  // without measuring 16,000 of them.
+                  itemExtent: _ChannelList.rowHeight,
+                  itemCount: items.length,
+                  itemBuilder: (context, index) {
+                    final item = items[index];
+                    final current = item.id == currentId;
+                    return Material(
+                      color: current
+                          ? accent.withValues(alpha: 0.16)
+                          : Colors.transparent,
+                      child: InkWell(
+                        onTap: () => onSelected(item),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Row(
+                            children: [
+                              ChannelLogo(
+                                url: item.logo,
+                                name: item.name,
+                                size: 34,
+                                radius: 8,
+                              ),
+                              const SizedBox(width: 11),
+                              Expanded(
+                                child: Text(
+                                  item.name,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    height: 1.25,
+                                    fontWeight: current
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
+                                    color: current ? accent : Colors.white,
+                                  ),
+                                ),
+                              ),
+                              if (isFavorite(item.id))
+                                const Icon(
+                                  Icons.star_rounded,
+                                  size: 15,
+                                  color: Color(0xFFFFC53D),
+                                ),
+                              if (current)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 6),
+                                  child: Icon(
+                                    Icons.equalizer_rounded,
+                                    size: 16,
+                                    color: accent,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
