@@ -106,6 +106,34 @@ class SettingsPage extends StatelessWidget {
                     ),
                   ),
                   const Divider(),
+                  ListTile(
+                    title: const Text('Buffer ahead'),
+                    subtitle: const Text(
+                      'How far ahead to load, so a dip in the connection does '
+                      'not stop playback. A film can be read minutes ahead; a '
+                      'live channel only as fast as the server sends it.',
+                      style: _subtitleStyle,
+                    ),
+                    trailing: DropdownButton<int>(
+                      value: settings.bufferAheadSeconds,
+                      underline: const SizedBox.shrink(),
+                      items: [
+                        for (final s in Settings.bufferAheadChoices)
+                          DropdownMenuItem(
+                            value: s,
+                            child: Text(
+                              s >= 60 ? '${s ~/ 60} min' : '$s s',
+                            ),
+                          ),
+                      ],
+                      onChanged: (v) => v == null
+                          ? null
+                          : state.updateSettings(
+                              settings.copyWith(bufferAheadSeconds: v),
+                            ),
+                    ),
+                  ),
+                  const Divider(),
                   _BufferSlider(
                     megabytes: settings.bufferMegabytes,
                     onChanged: (v) => state.updateSettings(

@@ -69,6 +69,31 @@ class MainActivity : FlutterActivity() {
                     "downloadStatus" ->
                         result.success(UpdateDownloadService.status(this))
 
+                    // Keeps the process alive while Dart saves a film, so
+                    // backgrounding the app does not kill the transfer.
+                    "keepAliveStart" -> {
+                        keepAlive(
+                            DownloadKeepAliveService.ACTION_START,
+                            call.argument<String>("title"),
+                            call.argument<Int>("percent"),
+                        )
+                        result.success(null)
+                    }
+
+                    "keepAliveUpdate" -> {
+                        keepAlive(
+                            DownloadKeepAliveService.ACTION_UPDATE,
+                            call.argument<String>("title"),
+                            call.argument<Int>("percent"),
+                        )
+                        result.success(null)
+                    }
+
+                    "keepAliveStop" -> {
+                        keepAlive(DownloadKeepAliveService.ACTION_STOP, null, null)
+                        result.success(null)
+                    }
+
                     "clearDownloadStatus" -> {
                         UpdateDownloadService.clear(this)
                         result.success(null)
@@ -104,6 +129,25 @@ class MainActivity : FlutterActivity() {
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(intent)
+    }
+
+    private fun keepAlive(action: String, title: String?, percent: Int?) {
+        val intent = Intent(this, DownloadKeepAliveService::class.java).apply {
+            this.action = action
+            if (title != null) putExtra(DownloadKeepAliveService.EXTRA_TITLE, title)
+            if (percent != null) {
+                putExtra(DownloadKeepAliveService.EXTRA_PERCENT, percent)
+            }
+        }
+        if (action == DownloadKeepAliveService.ACTION_STOP) {
+            startService(intent)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
     }
 
     /** Hands the transfer to a foreground service so it outlives this screen. */

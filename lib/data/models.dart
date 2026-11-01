@@ -258,10 +258,16 @@ class Settings {
     this.movieView = ViewMode.grid,
     this.resumePlayback = true,
     this.skipSeconds = 10,
+    this.bufferAheadSeconds = 30,
   });
 
   /// Offered in the settings screen for the double-tap skip.
   static const skipChoices = [5, 10, 15, 30];
+
+  /// How far ahead to read, in seconds. A film can genuinely be read minutes
+  /// ahead; a live stream only as fast as the server sends, so the larger
+  /// values mostly help on demand.
+  static const bufferAheadChoices = [10, 30, 60, 120, 300];
 
   /// Many providers key off a known player agent; this is the common default.
   static const defaultUserAgent =
@@ -286,6 +292,21 @@ class Settings {
 
   Duration get skip => Duration(seconds: skipSeconds);
 
+  /// Seconds of video to keep ahead of the playhead, so a dip in the
+  /// connection is ridden out instead of stopping playback.
+  final int bufferAheadSeconds;
+
+  /// Bytes to allow the demuxer, derived from the readahead at a generous
+  /// 6 Mbps and capped at 512 MB. Without raising this, the seconds target is
+  /// ignored — mpv stops reading when either limit is reached.
+  int get bufferAheadBytes {
+    const bytesPerSecond = 6 * 1024 * 1024 ~/ 8;
+    final wanted = bufferAheadSeconds * bytesPerSecond;
+    const floor = 32 * 1024 * 1024;
+    const ceiling = 512 * 1024 * 1024;
+    return wanted.clamp(floor, ceiling);
+  }
+
   ViewMode viewFor(MediaKind kind) =>
       kind == MediaKind.live ? liveView : movieView;
 
@@ -300,6 +321,7 @@ class Settings {
     ViewMode? movieView,
     bool? resumePlayback,
     int? skipSeconds,
+    int? bufferAheadSeconds,
   }) {
     return Settings(
       liveContainer: liveContainer ?? this.liveContainer,
@@ -312,6 +334,7 @@ class Settings {
       movieView: movieView ?? this.movieView,
       resumePlayback: resumePlayback ?? this.resumePlayback,
       skipSeconds: skipSeconds ?? this.skipSeconds,
+      bufferAheadSeconds: bufferAheadSeconds ?? this.bufferAheadSeconds,
     );
   }
 
@@ -326,6 +349,7 @@ class Settings {
     'movieView': movieView.name,
     'resumePlayback': resumePlayback,
     'skipSeconds': skipSeconds,
+    'bufferAheadSeconds': bufferAheadSeconds,
   };
 
   static Settings fromJson(Map<String, dynamic> json) {
@@ -347,6 +371,8 @@ class Settings {
       movieView: view('movieView', ViewMode.grid),
       resumePlayback: json['resumePlayback'] as bool? ?? true,
       skipSeconds: (json['skipSeconds'] as num?)?.toInt() ?? 10,
+      bufferAheadSeconds:
+          (json['bufferAheadSeconds'] as num?)?.toInt() ?? 30,
     );
   }
 }

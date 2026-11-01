@@ -130,7 +130,15 @@ class _PlayerPageState extends State<PlayerPage> {
   void _listen() {
     _subscriptions.addAll([
       _player.stream.playing.listen((v) {
-        if (mounted) setState(() => _playing = v);
+        if (!mounted) return;
+        setState(() {
+          _playing = v;
+          // Pictures are back, so the retry budget is spent no longer.
+          if (v && _reconnecting) {
+            _reconnecting = false;
+            _retries = 0;
+          }
+        });
       }),
       _player.stream.buffering.listen((v) {
         if (mounted) setState(() => _buffering = v);
@@ -152,9 +160,7 @@ class _PlayerPageState extends State<PlayerPage> {
       _player.stream.track.listen((v) {
         if (mounted) setState(() => _activeTrack = v);
       }),
-      _player.stream.error.listen((message) {
-        if (mounted) setState(() => _error = message);
-      }),
+      _player.stream.error.listen(_onStreamError),
     ]);
   }
 
@@ -166,7 +172,28 @@ class _PlayerPageState extends State<PlayerPage> {
     try {
       await platform.setProperty('network-timeout', '20');
       await platform.setProperty('user-agent', settings.userAgent);
-      // Keep playing from the live edge after a stall rather than drifting.
+
+      // Read ahead of the playhead so a dip in the connection is ridden out
+      // instead of stopping playback. Both limits matter: mpv stops reading
+      // when either the seconds or the bytes target is reached, so raising
+      // one without the other does nothing.
+      await platform.setProperty('cache', 'yes');
+      await platform.setProperty(
+        'demuxer-readahead-secs',
+        '${settings.bufferAheadSeconds}',
+      );
+      await platform.setProperty('cache-secs', '${settings.bufferAheadSeconds}');
+      await platform.setProperty(
+        'demuxer-max-bytes',
+        '${settings.bufferAheadBytes}',
+      );
+      // Enough behind the playhead to step back without refetching.
+      await platform.setProperty(
+        'demuxer-max-back-bytes',
+        '${16 * 1024 * 1024}',
+      );
+
+      // Fill a little before starting, so playback does not begin on empty.
       await platform.setProperty('cache-pause-initial', 'yes');
       await platform.setProperty('cache-pause-wait', '2');
     } catch (_) {
@@ -180,7 +207,11 @@ class _PlayerPageState extends State<PlayerPage> {
       _buffering = true;
       _position = Duration.zero;
       _duration = Duration.zero;
+      // A deliberate open starts the retry budget over.
+      _reconnecting = false;
+      _retries = 0;
     });
+    _retryTimer?.cancel();
 
     _pendingResume = item.kind == MediaKind.movie && _app.settings.resumePlayback
         ? _app.progressFor(item.id)?.position
@@ -200,6 +231,67 @@ class _PlayerPageState extends State<PlayerPage> {
       if (mounted) setState(() => _error = e.toString());
     }
     await _app.noteWatched(item);
+  }
+
+  // --- Reconnecting ---------------------------------------------------------
+
+  /// A dropped stream is usually the network rather than the channel, so the
+  /// player retries before showing anything, backing off a little each time.
+  static const _maxRetries = 4;
+  Timer? _retryTimer;
+  var _retries = 0;
+  var _reconnecting = false;
+
+  void _onStreamError(String message) {
+    if (!mounted) return;
+
+    if (_retries >= _maxRetries) {
+      setState(() {
+        _error = message;
+        _reconnecting = false;
+      });
+      return;
+    }
+
+    _retries++;
+    // 2s, 4s, 6s, 8s: long enough for a passing dip, short enough to feel
+    // like the app is trying.
+    final wait = Duration(seconds: 2 * _retries);
+    setState(() {
+      _error = null;
+      _reconnecting = true;
+    });
+
+    _retryTimer?.cancel();
+    _retryTimer = Timer(wait, () {
+      if (!mounted || !_reconnecting) return;
+      // Resume where it dropped rather than from the start of a film.
+      _reopen(resumeAt: _isLive ? null : _position);
+    });
+  }
+
+  /// Reopens the current item, keeping the retry counter so repeated failures
+  /// eventually give up instead of looping.
+  Future<void> _reopen({Duration? resumeAt}) async {
+    if (resumeAt != null && resumeAt > WatchProgress.minimum) {
+      _pendingResume = resumeAt;
+    }
+    final headers = <String, String>{
+      'User-Agent': _app.settings.userAgent,
+      ..._item.httpHeaders,
+    };
+    try {
+      await _player.open(
+        Media(_app.playableFor(_item).url, httpHeaders: headers),
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _reconnecting = false;
+        });
+      }
+    }
   }
 
   /// mpv only reports a duration once it has read the container header, and a
@@ -236,6 +328,7 @@ class _PlayerPageState extends State<PlayerPage> {
     _progressTimer?.cancel();
     _burstTimer?.cancel();
     _listTimer?.cancel();
+    _retryTimer?.cancel();
     _listScroll.dispose();
     // Capture the final position before the player is torn down.
     if (_item.kind == MediaKind.movie && _duration > Duration.zero) {
@@ -584,7 +677,10 @@ class _PlayerPageState extends State<PlayerPage> {
                   ),
                 ),
                 if (_error != null) _errorLayer(),
-                if (_error == null && _buffering) const _BufferingLayer(),
+                if (_error == null && _reconnecting)
+                  _ReconnectingLayer(attempt: _retries, of: _maxRetries),
+                if (_error == null && !_reconnecting && _buffering)
+                  const _BufferingLayer(),
                 Positioned.fill(
                   child: IgnorePointer(
                     child: AnimatedOpacity(
@@ -751,6 +847,60 @@ class _SkipBurst extends StatelessWidget {
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown instead of an error while the player is trying again, so a passing
+/// dip in the connection does not look like a dead channel.
+class _ReconnectingLayer extends StatelessWidget {
+  const _ReconnectingLayer({required this.attempt, required this.of});
+
+  final int attempt;
+  final int of;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 34,
+                height: 34,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.6,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Connection lost — reconnecting',
+                style: TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Attempt $attempt of $of',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Colors.white.withValues(alpha: 0.6),
                 ),
               ),
             ],

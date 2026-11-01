@@ -99,6 +99,14 @@
             android:exported="false"
             android:foregroundServiceType="dataSync"/>
 
+        <!-- Keeps the process alive while a film is saved for offline. The
+             transfer runs in Dart; this only stops Android reclaiming the
+             process while it is in the background. -->
+        <service
+            android:name=".DownloadKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
+
         <!-- Hands the downloaded update APK to the package installer. A plain
              file:// URI is rejected from Android 7 on. -->
         <provider

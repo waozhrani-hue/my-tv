@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:my_tv/data/download_keep_alive.dart';
 import 'package:my_tv/data/download_manager.dart';
 import 'package:my_tv/data/local_store.dart';
 import 'package:my_tv/data/models.dart';
@@ -71,7 +72,11 @@ void main() {
         contentLength: body.length,
       );
     });
-    return DownloadManager(store, client: client);
+    return DownloadManager(
+      store,
+      client: client,
+      keepAlive: const NoDownloadKeepAlive(),
+    );
   }
 
   Future<void> settle(DownloadManager manager) async {

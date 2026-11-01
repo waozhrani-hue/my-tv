@@ -935,6 +935,20 @@ class _ItemGrid extends StatelessWidget {
                       ),
                     ),
                   ),
+                  // Films are browsed as a grid by default, so without this
+                  // there was no way to save one for offline at all.
+                  if (item.kind == MediaKind.movie)
+                    Positioned(
+                      top: 2,
+                      left: 2,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: _SaveOfflineButton(item: item, compact: true),
+                      ),
+                    ),
                   if (watched != null)
                     Positioned(
                       left: 8,
@@ -961,9 +975,12 @@ class _ItemGrid extends StatelessWidget {
 
 /// Saves a film to the device, and then shows that it is saved.
 class _SaveOfflineButton extends StatelessWidget {
-  const _SaveOfflineButton({required this.item});
+  const _SaveOfflineButton({required this.item, this.compact = false});
 
   final MediaItem item;
+
+  /// Sized for a corner of a poster rather than a row.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -973,7 +990,7 @@ class _SaveOfflineButton extends StatelessWidget {
 
     if (record != null && record.isActive) {
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 12, vertical: 6),
         child: SizedBox(
           width: 18,
           height: 18,
@@ -989,12 +1006,20 @@ class _SaveOfflineButton extends StatelessWidget {
     return IconButton(
       tooltip: saved ? 'Saved on this device' : 'Save for offline',
       onPressed: saved ? null : () => state.downloadItem(item),
+      iconSize: compact ? 19 : 20,
+      style: compact
+          ? IconButton.styleFrom(
+              minimumSize: const Size(30, 30),
+              padding: EdgeInsets.zero,
+            )
+          : null,
       icon: Icon(
         saved
             ? Icons.offline_pin_rounded
             : Icons.download_for_offline_outlined,
-        size: 20,
-        color: saved ? scheme.primary : Colors.white.withValues(alpha: 0.35),
+        color: saved
+            ? scheme.primary
+            : Colors.white.withValues(alpha: compact ? 0.9 : 0.35),
       ),
     );
   }

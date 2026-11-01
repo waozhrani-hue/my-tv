@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import 'download_keep_alive.dart';
 import 'local_store.dart';
 import 'models.dart';
 
@@ -14,11 +15,16 @@ import 'models.dart';
 /// limited to a couple of simultaneous connections, and saturating them would
 /// break live playback while a film downloads.
 class DownloadManager extends ChangeNotifier {
-  DownloadManager(this._store, {http.Client? client})
-    : _client = client ?? http.Client();
+  DownloadManager(
+    this._store, {
+    http.Client? client,
+    DownloadKeepAlive? keepAlive,
+  }) : _client = client ?? http.Client(),
+       _keepAlive = keepAlive ?? DownloadKeepAlive.platform();
 
   final LocalStore _store;
   final http.Client _client;
+  final DownloadKeepAlive _keepAlive;
 
   /// Keyed by item id, in the order they were added.
   final Map<String, DownloadRecord> _records = {};
@@ -177,13 +183,18 @@ class DownloadManager extends ChangeNotifier {
 
     _activeId = next.item.id;
     _cancelRequested = false;
+    await _keepAlive.start(next.item.name);
     try {
       await _run(next, userAgent ?? Settings.defaultUserAgent);
     } finally {
       _activeId = null;
     }
-    // Carry on with whatever is still queued.
-    unawaited(_pump(userAgent: userAgent));
+
+    // Release the process as soon as the queue is empty, rather than leaving
+    // a notification sitting there.
+    final more = _records.values.any((r) => r.state == DownloadState.queued);
+    if (!more || _suspended) await _keepAlive.stop();
+    if (more) unawaited(_pump(userAgent: userAgent));
   }
 
   Future<void> _run(DownloadRecord record, String userAgent) async {
@@ -250,6 +261,7 @@ class DownloadManager extends ChangeNotifier {
         if (percent != lastPercent) {
           lastPercent = percent;
           update(_records[id]!.copyWith(receivedBytes: received));
+          unawaited(_keepAlive.update(record.item.name, percent));
         }
       }
 
