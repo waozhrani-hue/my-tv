@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -58,6 +61,38 @@ class SettingsPage extends StatelessWidget {
                       ),
                     ),
                   ),
+                  // Android-only: the copying path it replaces does not exist
+                  // on desktop.
+                  if (!kIsWeb && Platform.isAndroid) ...[
+                    const Divider(),
+                    ListTile(
+                      title: const Text('Video output'),
+                      subtitle: Text(
+                        '${settings.videoOutput.label} — '
+                        '${settings.videoOutput.description}'
+                        '\nApplies the next time you start playing.',
+                        style: _subtitleStyle,
+                      ),
+                      trailing: DropdownButton<VideoOutput>(
+                        value: settings.videoOutput,
+                        underline: const SizedBox.shrink(),
+                        items: [
+                          for (final v in VideoOutput.values)
+                            DropdownMenuItem(
+                              value: v,
+                              child: Text(
+                                v == VideoOutput.auto ? 'Standard' : 'Direct',
+                              ),
+                            ),
+                        ],
+                        onChanged: (v) => v == null
+                            ? null
+                            : state.updateSettings(
+                                settings.copyWith(videoOutput: v),
+                              ),
+                      ),
+                    ),
+                  ],
                   const Divider(),
                   ListTile(
                     title: const Text('Playback performance'),

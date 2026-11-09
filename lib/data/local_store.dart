@@ -67,6 +67,13 @@ class LocalStore {
     return result;
   }
 
+  /// Settles once every write asked for so far has finished.
+  ///
+  /// Some saves are fire-and-forget — a download reaching its end records
+  /// itself without anyone waiting - so there has to be a way to tell that
+  /// the directory is quiet before touching it from outside.
+  Future<void> flush() => _queue;
+
   Future<void> _writeJsonNow(String name, Object value) async {
     final target = _file(name);
     final temp = _file('$name.tmp');

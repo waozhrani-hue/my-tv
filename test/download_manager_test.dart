@@ -49,6 +49,9 @@ void main() {
           const MethodChannel('plugins.flutter.io/path_provider'),
           null,
         );
+    // A finished transfer saves itself without anyone waiting on it, so wait
+    // for the store to go quiet before pulling the directory out from under it.
+    await store.flush();
     // Windows holds a just-written file open for a moment after the sink
     // closes, so give the delete a few tries before letting it go.
     for (var attempt = 0; attempt < 6; attempt++) {

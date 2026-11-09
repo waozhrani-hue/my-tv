@@ -49,6 +49,7 @@ void main() {
   });
 
   tearDown(() async {
+    await store.flush();
     if (await temp.exists()) await temp.delete(recursive: true);
   });
 

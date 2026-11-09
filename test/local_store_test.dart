@@ -22,6 +22,7 @@ void main() {
   });
 
   tearDown(() async {
+    await store.flush();
     if (await temp.exists()) await temp.delete(recursive: true);
   });
 
@@ -169,6 +170,18 @@ void main() {
       expect(await store.readRecents(), isEmpty);
       expect(await store.readSources(), isEmpty);
       expect(await store.readProgress(), isEmpty);
+    });
+
+    test('flush waits for writes nobody awaited', () async {
+      // How a finished download saves itself: started, not awaited.
+      store.writeFavorites([one]);
+      store.writeRecents([two]);
+
+      await store.flush();
+
+      expect(await dataFile('favorites.json').exists(), isTrue);
+      expect(await dataFile('recents.json').exists(), isTrue);
+      expect((await store.readFavorites()).single.id, 'xt:live:1');
     });
   });
 }

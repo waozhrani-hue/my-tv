@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -102,12 +103,7 @@ class _PlayerPageState extends State<PlayerPage> {
         logLevel: MPVLogLevel.error,
       ),
     );
-    _controller = VideoController(
-      _player,
-      configuration: VideoControllerConfiguration(
-        enableHardwareAcceleration: settings.hardwareDecoding,
-      ),
-    );
+    _controller = VideoController(_player, configuration: _videoConfig(settings));
     _tracks = _player.state.tracks;
     _activeTrack = _player.state.track;
     _volume = _player.state.volume;
@@ -134,6 +130,38 @@ class _PlayerPageState extends State<PlayerPage> {
     if (_item.kind != MediaKind.movie) return;
     if (!_playing || _duration <= Duration.zero) return;
     _app.saveProgress(_item, _position, _duration);
+  }
+
+  /// Decides how decoded frames reach the screen.
+  ///
+  /// The default on Android is `mediacodec-copy`: hardware decodes, then every
+  /// frame is copied back to memory and uploaded to the GPU. On a head unit
+  /// that round trip costs more than the decoding — a 1080p H.264 stream was
+  /// dropping about a thousand frames with hardware decoding active, and more
+  /// at output than at decode, which points at the path to the screen rather
+  /// than the decoder. Direct output writes straight to the display surface
+  /// and skips the copy entirely.
+  VideoControllerConfiguration _videoConfig(Settings settings) {
+    final direct =
+        !kIsWeb &&
+        Platform.isAndroid &&
+        settings.videoOutput == VideoOutput.direct;
+
+    if (direct) {
+      return const VideoControllerConfiguration(
+        vo: 'mediacodec_embed',
+        hwdec: 'mediacodec',
+        enableHardwareAcceleration: true,
+      );
+    }
+
+    return VideoControllerConfiguration(
+      enableHardwareAcceleration: settings.hardwareDecoding,
+      // On the copying path, every pixel is carried twice, so rendering fewer
+      // of them is the cheapest win available. Only on the profile that has
+      // already accepted a softer picture.
+      scale: settings.playbackProfile == PlaybackProfile.smooth ? 0.7 : 1.0,
+    );
   }
 
   void _listen() {

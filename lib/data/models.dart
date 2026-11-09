@@ -46,6 +46,28 @@ enum PlaybackProfile {
   final String description;
 }
 
+/// How decoded frames reach the screen on Android.
+enum VideoOutput {
+  /// What media_kit picks by default: `mediacodec-copy`. The decoder hands
+  /// frames back to memory, which are then uploaded to the GPU. Flexible —
+  /// subtitles and filters work — but that round trip costs more than the
+  /// decoding itself on a weak device.
+  auto('Standard', 'Works everywhere. Subtitles and filters all available.'),
+
+  /// `mediacodec_embed`: the decoder writes straight to the display surface,
+  /// with no copy back to memory at all. Much lighter on a car head unit or
+  /// an old TV box; rendered subtitles may not appear.
+  direct(
+    'Direct to screen',
+    'Skips copying every frame through memory. Much lighter on weak devices '
+        '— try this if the picture stutters. Subtitles may not show.',
+  );
+
+  const VideoOutput(this.label, this.description);
+  final String label;
+  final String description;
+}
+
 /// The container used when building Xtream live URLs. Panels differ in which
 /// one they serve reliably, so this is user-switchable.
 enum LiveContainer {
@@ -282,6 +304,7 @@ class Settings {
     this.skipSeconds = 10,
     this.bufferAheadSeconds = 30,
     this.playbackProfile = PlaybackProfile.balanced,
+    this.videoOutput = VideoOutput.auto,
   });
 
   /// Offered in the settings screen for the double-tap skip.
@@ -322,6 +345,9 @@ class Settings {
   /// How much decoding work to trade away for smooth playback.
   final PlaybackProfile playbackProfile;
 
+  /// How decoded frames reach the screen. Android only.
+  final VideoOutput videoOutput;
+
   /// Bytes to allow the demuxer, derived from the readahead at a generous
   /// 6 Mbps and capped at 512 MB. Without raising this, the seconds target is
   /// ignored — mpv stops reading when either limit is reached.
@@ -349,6 +375,7 @@ class Settings {
     int? skipSeconds,
     int? bufferAheadSeconds,
     PlaybackProfile? playbackProfile,
+    VideoOutput? videoOutput,
   }) {
     return Settings(
       liveContainer: liveContainer ?? this.liveContainer,
@@ -363,6 +390,7 @@ class Settings {
       skipSeconds: skipSeconds ?? this.skipSeconds,
       bufferAheadSeconds: bufferAheadSeconds ?? this.bufferAheadSeconds,
       playbackProfile: playbackProfile ?? this.playbackProfile,
+      videoOutput: videoOutput ?? this.videoOutput,
     );
   }
 
@@ -379,6 +407,7 @@ class Settings {
     'skipSeconds': skipSeconds,
     'bufferAheadSeconds': bufferAheadSeconds,
     'playbackProfile': playbackProfile.name,
+    'videoOutput': videoOutput.name,
   };
 
   static Settings fromJson(Map<String, dynamic> json) {
@@ -405,6 +434,10 @@ class Settings {
       playbackProfile: PlaybackProfile.values.firstWhere(
         (p) => p.name == json['playbackProfile'],
         orElse: () => PlaybackProfile.balanced,
+      ),
+      videoOutput: VideoOutput.values.firstWhere(
+        (v) => v.name == json['videoOutput'],
+        orElse: () => VideoOutput.auto,
       ),
     );
   }

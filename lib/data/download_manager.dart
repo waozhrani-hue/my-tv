@@ -305,7 +305,19 @@ class DownloadManager extends ChangeNotifier {
     }
   }
 
-  Future<void> _save() => _store.writeDownloads(records);
+  /// Records the current list, and never throws for it.
+  ///
+  /// Most saves are fire-and-forget — the end of a transfer, a progress tick —
+  /// so an error here would surface as an unhandled one with nothing to catch
+  /// it. The list is rewritten in full on every change, so the next save
+  /// repairs whatever this one lost.
+  Future<void> _save() async {
+    try {
+      await _store.writeDownloads(records);
+    } catch (e) {
+      debugPrint('Could not save the download list: $e');
+    }
+  }
 
   static String _message(Object error) => switch (error) {
     TimeoutException() => 'The server stopped responding.',
