@@ -59,6 +59,37 @@ class SettingsPage extends StatelessWidget {
                     ),
                   ),
                   const Divider(),
+                  ListTile(
+                    title: const Text('Playback performance'),
+                    subtitle: Text(
+                      '${settings.playbackProfile.label} — '
+                      '${settings.playbackProfile.description}',
+                      style: _subtitleStyle,
+                    ),
+                    trailing: DropdownButton<PlaybackProfile>(
+                      value: settings.playbackProfile,
+                      underline: const SizedBox.shrink(),
+                      items: [
+                        for (final p in PlaybackProfile.values)
+                          DropdownMenuItem(
+                            value: p,
+                            child: Text(
+                              switch (p) {
+                                PlaybackProfile.quality => 'Quality',
+                                PlaybackProfile.balanced => 'Balanced',
+                                PlaybackProfile.smooth => 'Smooth',
+                              },
+                            ),
+                          ),
+                      ],
+                      onChanged: (v) => v == null
+                          ? null
+                          : state.updateSettings(
+                              settings.copyWith(playbackProfile: v),
+                            ),
+                    ),
+                  ),
+                  const Divider(),
                   SwitchListTile(
                     value: settings.resumePlayback,
                     onChanged: (v) => state.updateSettings(

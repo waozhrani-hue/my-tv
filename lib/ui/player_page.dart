@@ -63,6 +63,15 @@ class _PlayerPageState extends State<PlayerPage> {
   var _listVisible = false;
   final _listScroll = ScrollController();
 
+  // What the decoder is actually doing, shown by the playback-info overlay.
+  // Dropped frames climbing while the picture stutters is the proof that the
+  // device cannot keep up, as opposed to the connection.
+  var _statsVisible = false;
+  String? _hwdec;
+  String? _codec;
+  var _droppedVo = 0;
+  var _droppedDecoder = 0;
+
   var _controlsVisible = true;
   var _playing = false;
   var _buffering = true;
@@ -196,9 +205,78 @@ class _PlayerPageState extends State<PlayerPage> {
       // Fill a little before starting, so playback does not begin on empty.
       await platform.setProperty('cache-pause-initial', 'yes');
       await platform.setProperty('cache-pause-wait', '2');
+
+      await _applyProfile(platform, settings.playbackProfile);
+      await _observeStats(platform);
     } catch (_) {
       // Non-fatal: these are tuning hints, not requirements.
     }
+  }
+
+  /// Trades decoding work for smoothness.
+  ///
+  /// A car head unit cannot decode 4K in real time — it stutters even on a
+  /// file already on the device, which is what rules the network out. These
+  /// are the knobs that buy the most throughput for the least visible loss:
+  /// the loop filter is expensive and its absence is subtle, and a dropped
+  /// non-reference frame is cheaper than falling behind.
+  Future<void> _applyProfile(
+    NativePlayer platform,
+    PlaybackProfile profile,
+  ) async {
+    switch (profile) {
+      case PlaybackProfile.quality:
+        await platform.setProperty('framedrop', 'vo');
+        await platform.setProperty('vd-lavc-skiploopfilter', 'no');
+        await platform.setProperty('vd-lavc-skipframe', 'no');
+        await platform.setProperty('vd-lavc-fast', 'no');
+
+      case PlaybackProfile.balanced:
+        await platform.setProperty('framedrop', 'decoder+vo');
+        await platform.setProperty('vd-lavc-skiploopfilter', 'nonref');
+        await platform.setProperty('vd-lavc-skipframe', 'no');
+        await platform.setProperty('vd-lavc-fast', 'yes');
+
+      case PlaybackProfile.smooth:
+        await platform.setProperty('framedrop', 'decoder+vo');
+        // Skipping the loop filter outright is the single biggest saving on
+        // H.264 and HEVC; it softens edges and nothing more.
+        await platform.setProperty('vd-lavc-skiploopfilter', 'all');
+        await platform.setProperty('vd-lavc-skipframe', 'nonref');
+        await platform.setProperty('vd-lavc-fast', 'yes');
+        // Cheapest scalers, and no extra passes over the picture.
+        await platform.setProperty('scale', 'bilinear');
+        await platform.setProperty('dscale', 'bilinear');
+        await platform.setProperty('cscale', 'bilinear');
+        await platform.setProperty('dither', 'no');
+        await platform.setProperty('correct-downscaling', 'no');
+        await platform.setProperty('sigmoid-upscaling', 'no');
+        await platform.setProperty('deband', 'no');
+    }
+    // Let every core help; the default leaves some idle on small SoCs.
+    await platform.setProperty('vd-lavc-threads', '0');
+    await platform.setProperty('video-sync', 'audio');
+  }
+
+  /// Watches the few figures that say whether the device is keeping up.
+  Future<void> _observeStats(NativePlayer platform) async {
+    Future<void> watch(String property, void Function(String) apply) async {
+      try {
+        await platform.observeProperty(property, (value) async {
+          if (mounted) setState(() => apply(value));
+        });
+      } catch (_) {
+        // Not every build exposes every property.
+      }
+    }
+
+    await watch('hwdec-current', (v) => _hwdec = v);
+    await watch('video-format', (v) => _codec = v);
+    await watch('frame-drop-count', (v) => _droppedVo = int.tryParse(v) ?? 0);
+    await watch(
+      'decoder-frame-drop-count',
+      (v) => _droppedDecoder = int.tryParse(v) ?? 0,
+    );
   }
 
   Future<void> _open(MediaItem item) async {
@@ -598,6 +676,8 @@ class _PlayerPageState extends State<PlayerPage> {
       case LogicalKeyboardKey.keyL:
       case LogicalKeyboardKey.contextMenu:
         _toggleList();
+      case LogicalKeyboardKey.keyI:
+        setState(() => _statsVisible = !_statsVisible);
       case LogicalKeyboardKey.escape:
         // Closes the list first, then fullscreen, then the player: one step
         // back at a time rather than dropping out of everything at once.
@@ -701,6 +781,17 @@ class _PlayerPageState extends State<PlayerPage> {
                     child: _controlsLayer(),
                   ),
                 ),
+                if (_statsVisible)
+                  _StatsOverlay(
+                    width: _player.state.width,
+                    height: _player.state.height,
+                    hwdec: _hwdec,
+                    codec: _codec,
+                    droppedDecoder: _droppedDecoder,
+                    droppedOutput: _droppedVo,
+                    profile: _app.settings.playbackProfile,
+                    bufferAhead: _app.settings.bufferAheadSeconds,
+                  ),
                 _ChannelList(
                   visible: _listVisible,
                   items: _listItems,
@@ -757,6 +848,11 @@ class _PlayerPageState extends State<PlayerPage> {
           onBack: _close,
           onShowList: _listItems.length > 1 ? _toggleList : null,
           listOpen: _listVisible,
+          onToggleStats: () {
+            setState(() => _statsVisible = !_statsVisible);
+            _poke();
+          },
+          statsOpen: _statsVisible,
           trailing: _TrackMenus(
             tracks: _tracks,
             active: _activeTrack,
@@ -857,6 +953,137 @@ class _SkipBurst extends StatelessWidget {
   }
 }
 
+/// What the decoder is actually doing.
+///
+/// This exists to settle one question quickly: is the picture stuttering
+/// because of the connection, or because the device cannot decode what it is
+/// being sent? Dropped frames climbing on a file already saved to the device
+/// answers it — that is decoding, not network.
+class _StatsOverlay extends StatelessWidget {
+  const _StatsOverlay({
+    required this.width,
+    required this.height,
+    required this.hwdec,
+    required this.codec,
+    required this.droppedDecoder,
+    required this.droppedOutput,
+    required this.profile,
+    required this.bufferAhead,
+  });
+
+  final int? width;
+  final int? height;
+  final String? hwdec;
+  final String? codec;
+  final int droppedDecoder;
+  final int droppedOutput;
+  final PlaybackProfile profile;
+  final int bufferAhead;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final hardware = hwdec != null && hwdec != 'no' && hwdec!.isNotEmpty;
+    final dropping = droppedDecoder + droppedOutput > 0;
+
+    return Positioned(
+      top: 78,
+      right: 14,
+      child: IgnorePointer(
+        child: Container(
+          width: 250,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.75),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'PLAYBACK',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                  color: scheme.primary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _row(
+                'Resolution',
+                width == null || height == null ? '—' : '${width}x$height',
+              ),
+              _row('Codec', codec ?? '—'),
+              _row(
+                'Decoder',
+                hardware ? 'hardware ($hwdec)' : 'software',
+                warn: !hardware,
+              ),
+              _row(
+                'Frames dropped',
+                '$droppedDecoder decode / $droppedOutput output',
+                warn: dropping,
+              ),
+              _row('Profile', profile.label),
+              _row('Buffer ahead', '${bufferAhead}s'),
+              if (dropping) ...[
+                const SizedBox(height: 8),
+                Text(
+                  !hardware
+                      ? 'Decoding in software and dropping frames — this '
+                            'device cannot keep up with this stream. Try '
+                            'Smooth in Settings.'
+                      : 'Dropping frames. Try Smooth in Settings, or a '
+                            'lower-quality version of this channel.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    height: 1.4,
+                    color: scheme.error,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _row(String label, String value, {bool warn = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 96,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 11.5,
+                color: Colors.white.withValues(alpha: 0.5),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: warn ? const Color(0xFFFF8077) : Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Shown instead of an error while the player is trying again, so a passing
 /// dip in the connection does not look like a dead channel.
 class _ReconnectingLayer extends StatelessWidget {
@@ -935,9 +1162,14 @@ class _TopBar extends StatelessWidget {
     required this.isLive,
     required this.onBack,
     required this.trailing,
+    required this.onToggleStats,
+    required this.statsOpen,
     this.onShowList,
     this.listOpen = false,
   });
+
+  final VoidCallback onToggleStats;
+  final bool statsOpen;
 
   final String title;
   final String? subtitle;
@@ -1009,6 +1241,16 @@ class _TopBar extends StatelessWidget {
                     ),
                   ),
               ],
+            ),
+          ),
+          IconButton(
+            onPressed: onToggleStats,
+            tooltip: 'Playback info (I)',
+            icon: Icon(
+              Icons.insights_rounded,
+              color: statsOpen
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.white,
             ),
           ),
           if (onShowList case final show?)

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -50,7 +51,23 @@ class LocalStore {
     return null;
   }
 
-  Future<void> _writeJson(String name, Object value) async {
+  /// Writes run one at a time.
+  ///
+  /// Two callers saving the same record at once — a download finishing while
+  /// another is removed, say — raced on the rename, and Windows refuses it
+  /// while the other write holds the file. Serialising costs nothing here:
+  /// these files are small and written rarely.
+  Future<void> _queue = Future<void>.value();
+
+  Future<void> _writeJson(String name, Object value) {
+    final result = _queue.then((_) => _writeJsonNow(name, value));
+    // The chain has to carry on whatever this one did, or a single failure
+    // would block every later write.
+    _queue = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
+  Future<void> _writeJsonNow(String name, Object value) async {
     final target = _file(name);
     final temp = _file('$name.tmp');
     final backup = _file('$name.bak');

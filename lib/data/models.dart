@@ -24,6 +24,28 @@ enum ViewMode {
   ViewMode get other => this == ViewMode.list ? ViewMode.grid : ViewMode.list;
 }
 
+/// How much decoding work to trade away for smooth playback.
+///
+/// A weak device — a car head unit especially — cannot decode a 4K stream in
+/// real time, and stutters even on a file already saved to it. Skipping work
+/// the picture barely misses is what makes those devices watchable.
+enum PlaybackProfile {
+  quality('Full quality', 'Decode everything. For a capable device.'),
+  balanced(
+    'Balanced',
+    'Drops a frame rather than falling behind. A good default.',
+  ),
+  smooth(
+    'Smooth on weak devices',
+    'Skips filtering and non-key frames, and scales cheaply. Softer picture, '
+        'far fewer stutters — for car screens and older TV boxes.',
+  );
+
+  const PlaybackProfile(this.label, this.description);
+  final String label;
+  final String description;
+}
+
 /// The container used when building Xtream live URLs. Panels differ in which
 /// one they serve reliably, so this is user-switchable.
 enum LiveContainer {
@@ -259,6 +281,7 @@ class Settings {
     this.resumePlayback = true,
     this.skipSeconds = 10,
     this.bufferAheadSeconds = 30,
+    this.playbackProfile = PlaybackProfile.balanced,
   });
 
   /// Offered in the settings screen for the double-tap skip.
@@ -296,6 +319,9 @@ class Settings {
   /// connection is ridden out instead of stopping playback.
   final int bufferAheadSeconds;
 
+  /// How much decoding work to trade away for smooth playback.
+  final PlaybackProfile playbackProfile;
+
   /// Bytes to allow the demuxer, derived from the readahead at a generous
   /// 6 Mbps and capped at 512 MB. Without raising this, the seconds target is
   /// ignored — mpv stops reading when either limit is reached.
@@ -322,6 +348,7 @@ class Settings {
     bool? resumePlayback,
     int? skipSeconds,
     int? bufferAheadSeconds,
+    PlaybackProfile? playbackProfile,
   }) {
     return Settings(
       liveContainer: liveContainer ?? this.liveContainer,
@@ -335,6 +362,7 @@ class Settings {
       resumePlayback: resumePlayback ?? this.resumePlayback,
       skipSeconds: skipSeconds ?? this.skipSeconds,
       bufferAheadSeconds: bufferAheadSeconds ?? this.bufferAheadSeconds,
+      playbackProfile: playbackProfile ?? this.playbackProfile,
     );
   }
 
@@ -350,6 +378,7 @@ class Settings {
     'resumePlayback': resumePlayback,
     'skipSeconds': skipSeconds,
     'bufferAheadSeconds': bufferAheadSeconds,
+    'playbackProfile': playbackProfile.name,
   };
 
   static Settings fromJson(Map<String, dynamic> json) {
@@ -373,6 +402,10 @@ class Settings {
       skipSeconds: (json['skipSeconds'] as num?)?.toInt() ?? 10,
       bufferAheadSeconds:
           (json['bufferAheadSeconds'] as num?)?.toInt() ?? 30,
+      playbackProfile: PlaybackProfile.values.firstWhere(
+        (p) => p.name == json['playbackProfile'],
+        orElse: () => PlaybackProfile.balanced,
+      ),
     );
   }
 }
