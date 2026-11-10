@@ -49,3 +49,6 @@ app.*.map.json
 /android/key.properties
 *.jks
 *.keystore
+
+# A third-party APK dropped in for comparison. Not ours to publish.
+TEI.apk
