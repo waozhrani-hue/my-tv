@@ -174,6 +174,29 @@ void main() {
       expect(restored.userAgent, Settings.defaultUserAgent);
       expect(restored.hardwareDecoding, isTrue);
       expect(restored.bufferMegabytes, 32);
+      // mpv stays the default: it is the only engine off Android, and the
+      // one with the wider format support.
+      expect(restored.playerEngine, PlayerEngine.mpv);
+      expect(restored.videoOutput, VideoOutput.auto);
+    });
+
+    test('the chosen player and video output survive a round trip', () {
+      const original = Settings(
+        playerEngine: PlayerEngine.native,
+        videoOutput: VideoOutput.direct,
+        playbackProfile: PlaybackProfile.smooth,
+      );
+
+      final restored = _roundTrip(original.toJson(), Settings.fromJson);
+      expect(restored.playerEngine, PlayerEngine.native);
+      expect(restored.videoOutput, VideoOutput.direct);
+      expect(restored.playbackProfile, PlaybackProfile.smooth);
+    });
+
+    test('an unknown stored engine falls back rather than throwing', () {
+      // A settings file written by a newer build, opened by an older one.
+      final restored = Settings.fromJson(const {'playerEngine': 'quantum'});
+      expect(restored.playerEngine, PlayerEngine.mpv);
     });
 
     test('container extensions match what panels expect', () {

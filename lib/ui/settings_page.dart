@@ -66,6 +66,35 @@ class SettingsPage extends StatelessWidget {
                   if (!kIsWeb && Platform.isAndroid) ...[
                     const Divider(),
                     ListTile(
+                      title: const Text('Player'),
+                      subtitle: Text(
+                        '${settings.playerEngine.label} — '
+                        '${settings.playerEngine.description}'
+                        '\nApplies the next time you start playing.',
+                        style: _subtitleStyle,
+                      ),
+                      trailing: DropdownButton<PlayerEngine>(
+                        value: settings.playerEngine,
+                        underline: const SizedBox.shrink(),
+                        items: [
+                          for (final e in PlayerEngine.values)
+                            DropdownMenuItem(
+                              value: e,
+                              child: Text(
+                                e == PlayerEngine.mpv ? 'mpv' : 'Android',
+                              ),
+                            ),
+                        ],
+                        onChanged: (e) => e == null
+                            ? null
+                            : state.updateSettings(
+                                settings.copyWith(playerEngine: e),
+                              ),
+                      ),
+                    ),
+                    const Divider(),
+                    ListTile(
+                      enabled: settings.playerEngine == PlayerEngine.mpv,
                       title: const Text('Video output'),
                       subtitle: Text(
                         '${settings.videoOutput.label} — '

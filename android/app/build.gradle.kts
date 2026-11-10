@@ -83,6 +83,15 @@ android {
 dependencies {
     // FileProvider, used to hand the downloaded update to the installer.
     implementation("androidx.core:core-ktx:1.13.1")
+
+    // The ExoPlayer engine. A car head unit that stutters on libmpv plays the
+    // same stream faultlessly through this path, because a SurfaceView goes
+    // to the display controller instead of through Flutter's compositor.
+    // -hls for .m3u8 playlists; -ui for PlayerView, which brings the surface,
+    // the letterboxing and native subtitle rendering with it.
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
 }
 
 kotlin {

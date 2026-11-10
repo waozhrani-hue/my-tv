@@ -10,5 +10,5 @@ abstract final class AppInfo {
   static const edition = 'إصدار خاص (لمعاليكم)';
 
   /// Keep in step with `version:` in pubspec.yaml.
-  static const version = '1.11.0';
+  static const version = '1.12.0';
 }

@@ -68,6 +68,36 @@ enum VideoOutput {
   final String description;
 }
 
+/// Which player decodes and draws the picture on Android.
+///
+/// Why there are two: a car head unit that stutters badly here plays the same
+/// 1080p channel without a fault in a native Android IPTV app. Opening one of
+/// those up settles why — ExoPlayer, MediaCodec and a SurfaceView, and no
+/// libmpv anywhere. mpv on Android has to hand every frame to Flutter as a
+/// texture; ExoPlayer on a surface hands it to the display controller, which
+/// on a weak SoC is the whole difference.
+enum PlayerEngine {
+  /// libmpv, through media_kit. Every codec, every track, every tuning knob,
+  /// and the only engine on Windows.
+  mpv(
+    'mpv (default)',
+    'Widest format support, full track and buffer control. Best on a phone, '
+        'a TV box or a PC.',
+  ),
+
+  /// Android's own ExoPlayer, drawing into a SurfaceView.
+  native(
+    'Android native',
+    'What the IPTV apps built for car screens use. The picture goes straight '
+        'to the display with no copy through Flutter — try this if playback '
+        'stutters on a head unit.',
+  );
+
+  const PlayerEngine(this.label, this.description);
+  final String label;
+  final String description;
+}
+
 /// The container used when building Xtream live URLs. Panels differ in which
 /// one they serve reliably, so this is user-switchable.
 enum LiveContainer {
@@ -305,6 +335,7 @@ class Settings {
     this.bufferAheadSeconds = 30,
     this.playbackProfile = PlaybackProfile.balanced,
     this.videoOutput = VideoOutput.auto,
+    this.playerEngine = PlayerEngine.mpv,
   });
 
   /// Offered in the settings screen for the double-tap skip.
@@ -348,6 +379,9 @@ class Settings {
   /// How decoded frames reach the screen. Android only.
   final VideoOutput videoOutput;
 
+  /// Which player decodes and draws. Android only; Windows is always mpv.
+  final PlayerEngine playerEngine;
+
   /// Bytes to allow the demuxer, derived from the readahead at a generous
   /// 6 Mbps and capped at 512 MB. Without raising this, the seconds target is
   /// ignored — mpv stops reading when either limit is reached.
@@ -376,6 +410,7 @@ class Settings {
     int? bufferAheadSeconds,
     PlaybackProfile? playbackProfile,
     VideoOutput? videoOutput,
+    PlayerEngine? playerEngine,
   }) {
     return Settings(
       liveContainer: liveContainer ?? this.liveContainer,
@@ -391,6 +426,7 @@ class Settings {
       bufferAheadSeconds: bufferAheadSeconds ?? this.bufferAheadSeconds,
       playbackProfile: playbackProfile ?? this.playbackProfile,
       videoOutput: videoOutput ?? this.videoOutput,
+      playerEngine: playerEngine ?? this.playerEngine,
     );
   }
 
@@ -408,6 +444,7 @@ class Settings {
     'bufferAheadSeconds': bufferAheadSeconds,
     'playbackProfile': playbackProfile.name,
     'videoOutput': videoOutput.name,
+    'playerEngine': playerEngine.name,
   };
 
   static Settings fromJson(Map<String, dynamic> json) {
@@ -438,6 +475,10 @@ class Settings {
       videoOutput: VideoOutput.values.firstWhere(
         (v) => v.name == json['videoOutput'],
         orElse: () => VideoOutput.auto,
+      ),
+      playerEngine: PlayerEngine.values.firstWhere(
+        (e) => e.name == json['playerEngine'],
+        orElse: () => PlayerEngine.mpv,
       ),
     );
   }

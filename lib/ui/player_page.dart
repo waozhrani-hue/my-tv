@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../data/exo_engine.dart';
 import '../data/models.dart';
 import '../state/app_state.dart';
 import 'theme.dart';
@@ -34,8 +35,13 @@ class _PlayerPageState extends State<PlayerPage> {
   /// what makes repeated taps feel like one continuous scrub.
   static const _burstWindow = Duration(milliseconds: 900);
 
-  late final Player _player;
-  late final VideoController _controller;
+  // Exactly one engine is live, decided by [Settings.playerEngine]. Off
+  // Android there is only mpv. Everything above these two — every control,
+  // overlay and list — is the same either way.
+  Player? _mpv;
+  VideoController? _mpvController;
+  ExoEngine? _exo;
+
   final _subscriptions = <StreamSubscription<Object?>>[];
   final _focus = FocusNode();
 
@@ -73,6 +79,19 @@ class _PlayerPageState extends State<PlayerPage> {
   var _droppedVo = 0;
   var _droppedDecoder = 0;
 
+  /// The picture's own size, whichever engine reported it.
+  int? get _pictureWidth {
+    final exo = _exo;
+    if (exo != null) return exo.width == 0 ? null : exo.width;
+    return _mpv?.state.width;
+  }
+
+  int? get _pictureHeight {
+    final exo = _exo;
+    if (exo != null) return exo.height == 0 ? null : exo.height;
+    return _mpv?.state.height;
+  }
+
   var _controlsVisible = true;
   var _playing = false;
   var _buffering = true;
@@ -94,19 +113,34 @@ class _PlayerPageState extends State<PlayerPage> {
     _item = widget.item;
 
     final settings = _app.settings;
-    _player = Player(
-      configuration: PlayerConfiguration(
-        title: 'My TV',
-        // Live streams stall on small buffers; this is the main knob that
-        // decides how well a flaky provider plays.
-        bufferSize: settings.bufferMegabytes * 1024 * 1024,
-        logLevel: MPVLogLevel.error,
-      ),
-    );
-    _controller = VideoController(_player, configuration: _videoConfig(settings));
-    _tracks = _player.state.tracks;
-    _activeTrack = _player.state.track;
-    _volume = _player.state.volume;
+    if (_useExo(settings)) {
+      final exo = ExoEngine();
+      _exo = exo;
+      _tracks = const Tracks();
+      _activeTrack = const Track();
+      exo.create(
+        bufferAheadSeconds: settings.bufferAheadSeconds,
+        bufferAheadBytes: settings.bufferAheadBytes,
+      );
+    } else {
+      final player = Player(
+        configuration: PlayerConfiguration(
+          title: 'My TV',
+          // Live streams stall on small buffers; this is the main knob that
+          // decides how well a flaky provider plays.
+          bufferSize: settings.bufferMegabytes * 1024 * 1024,
+          logLevel: MPVLogLevel.error,
+        ),
+      );
+      _mpv = player;
+      _mpvController = VideoController(
+        player,
+        configuration: _videoConfig(settings),
+      );
+      _tracks = player.state.tracks;
+      _activeTrack = player.state.track;
+      _volume = player.state.volume;
+    }
 
     // A provider that allows one connection at a time gives it to whichever
     // asks first, so a running download would leave nothing to play with.
@@ -155,18 +189,106 @@ class _PlayerPageState extends State<PlayerPage> {
       );
     }
 
+    // Rendering below the picture's own resolution is the cheapest saving
+    // there is, but only off Android: media_kit's Android controller refuses
+    // setSize outright, so a scale here would be silently ignored.
+    final scalable = !kIsWeb && !Platform.isAndroid;
     return VideoControllerConfiguration(
       enableHardwareAcceleration: settings.hardwareDecoding,
-      // On the copying path, every pixel is carried twice, so rendering fewer
-      // of them is the cheapest win available. Only on the profile that has
-      // already accepted a softer picture.
-      scale: settings.playbackProfile == PlaybackProfile.smooth ? 0.7 : 1.0,
+      scale: scalable && settings.playbackProfile == PlaybackProfile.smooth
+          ? 0.7
+          : 1.0,
     );
   }
 
+  /// ExoPlayer only exists on Android; everywhere else mpv is the only engine.
+  static bool _useExo(Settings settings) =>
+      !kIsWeb &&
+      Platform.isAndroid &&
+      settings.playerEngine == PlayerEngine.native;
+
+  // --- One set of commands, either engine ------------------------------------
+
+  void _cmdPlayOrPause() {
+    _exo?.playOrPause();
+    _mpv?.playOrPause();
+  }
+
+  void _cmdSeek(Duration position) {
+    _exo?.seek(position);
+    _mpv?.seek(position);
+  }
+
+  void _cmdVolume(double percent) {
+    _exo?.setVolume(percent);
+    _mpv?.setVolume(percent);
+  }
+
+  Future<void> _cmdOpen(String url, Map<String, String> headers) async {
+    final exo = _exo;
+    if (exo != null) {
+      await exo.open(url, headers: headers, startAt: _pendingResume);
+      // ExoPlayer takes the start position with the stream rather than after
+      // it, so the resume is already done by the time it plays.
+      _pendingResume = null;
+      return;
+    }
+    await _mpv?.open(Media(url, httpHeaders: headers));
+  }
+
   void _listen() {
+    final exo = _exo;
+    if (exo != null) {
+      _subscriptions.addAll([
+        exo.playingStream.listen((v) {
+          if (!mounted) return;
+          setState(() {
+            _playing = v;
+            if (v && _reconnecting) {
+              _reconnecting = false;
+              _retries = 0;
+            }
+          });
+        }),
+        exo.bufferingStream.listen((v) {
+          if (mounted) setState(() => _buffering = v);
+        }),
+        exo.positionStream.listen((v) {
+          if (mounted) setState(() => _position = v);
+        }),
+        exo.durationStream.listen((v) {
+          if (!mounted) return;
+          setState(() => _duration = v);
+          _applyPendingResume(v);
+        }),
+        exo.tracksStream.listen((v) {
+          if (mounted) setState(() => _tracks = v);
+        }),
+        exo.trackStream.listen((v) {
+          if (mounted) setState(() => _activeTrack = v);
+        }),
+        exo.errorStream.listen(_onStreamError),
+      ]);
+      // The decoder figures arrive with every position tick, so the overlay
+      // follows them without a second subscription.
+      _subscriptions.add(
+        exo.positionStream.listen((_) {
+          if (!mounted || !_statsVisible) return;
+          setState(() {
+            _hwdec = exo.decoder;
+            _codec = exo.codec;
+            // ExoPlayer counts frames dropped on the way out; it has no
+            // separate figure for ones the decoder skipped.
+            _droppedVo = exo.droppedFrames;
+          });
+        }),
+      );
+      return;
+    }
+
+    final player = _mpv!;
     _subscriptions.addAll([
-      _player.stream.playing.listen((v) {
+      player.stream.playing.listen((v) {
         if (!mounted) return;
         setState(() {
           _playing = v;
@@ -177,34 +299,34 @@ class _PlayerPageState extends State<PlayerPage> {
           }
         });
       }),
-      _player.stream.buffering.listen((v) {
+      player.stream.buffering.listen((v) {
         if (mounted) setState(() => _buffering = v);
       }),
-      _player.stream.position.listen((v) {
+      player.stream.position.listen((v) {
         if (mounted) setState(() => _position = v);
       }),
-      _player.stream.duration.listen((v) {
+      player.stream.duration.listen((v) {
         if (!mounted) return;
         setState(() => _duration = v);
         _applyPendingResume(v);
       }),
-      _player.stream.volume.listen((v) {
+      player.stream.volume.listen((v) {
         if (mounted) setState(() => _volume = v);
       }),
-      _player.stream.tracks.listen((v) {
+      player.stream.tracks.listen((v) {
         if (mounted) setState(() => _tracks = v);
       }),
-      _player.stream.track.listen((v) {
+      player.stream.track.listen((v) {
         if (mounted) setState(() => _activeTrack = v);
       }),
-      _player.stream.error.listen(_onStreamError),
+      player.stream.error.listen(_onStreamError),
     ]);
   }
 
   /// mpv options that are not exposed through [PlayerConfiguration] but matter
   /// for IPTV: a sane network timeout and the provider's expected User-Agent.
   Future<void> _applyNativeOptions(Settings settings) async {
-    final platform = _player.platform;
+    final platform = _mpv?.platform;
     if (platform is! NativePlayer) return;
     try {
       await platform.setProperty('network-timeout', '20');
@@ -332,7 +454,7 @@ class _PlayerPageState extends State<PlayerPage> {
     };
 
     try {
-      await _player.open(Media(playable.url, httpHeaders: headers));
+      await _cmdOpen(playable.url, headers);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
@@ -387,9 +509,7 @@ class _PlayerPageState extends State<PlayerPage> {
       ..._item.httpHeaders,
     };
     try {
-      await _player.open(
-        Media(_app.playableFor(_item).url, httpHeaders: headers),
-      );
+      await _cmdOpen(_app.playableFor(_item).url, headers);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -407,7 +527,7 @@ class _PlayerPageState extends State<PlayerPage> {
     if (target == null || duration <= Duration.zero) return;
     _pendingResume = null;
     if (target >= duration - WatchProgress.tailMargin) return;
-    _player.seek(target);
+    _cmdSeek(target);
     _showResumeNotice(target);
   }
 
@@ -420,7 +540,7 @@ class _PlayerPageState extends State<PlayerPage> {
         action: SnackBarAction(
           label: 'Start over',
           onPressed: () {
-            _player.seek(Duration.zero);
+            _cmdSeek(Duration.zero);
             _app.clearProgress(_item.id);
           },
         ),
@@ -444,7 +564,8 @@ class _PlayerPageState extends State<PlayerPage> {
       sub.cancel();
     }
     _focus.dispose();
-    _player.dispose();
+    _mpv?.dispose();
+    _exo?.dispose();
     _app.downloads.resumeAfterPlayback();
     WakelockPlus.disable();
     // Leaving the player must not leave the shell in fullscreen.
@@ -543,7 +664,7 @@ class _PlayerPageState extends State<PlayerPage> {
   // --- Playback actions -----------------------------------------------------
 
   void _togglePlay() {
-    _player.playOrPause();
+    _cmdPlayOrPause();
     _poke();
   }
 
@@ -555,7 +676,7 @@ class _PlayerPageState extends State<PlayerPage> {
     var target = _position + delta;
     if (target < Duration.zero) target = Duration.zero;
     if (target > _duration) target = _duration;
-    _player.seek(target);
+    _cmdSeek(target);
     _poke();
   }
 
@@ -595,7 +716,7 @@ class _PlayerPageState extends State<PlayerPage> {
 
   void _setVolume(double value) {
     final v = value.clamp(0.0, 100.0);
-    _player.setVolume(v);
+    _cmdVolume(v);
     setState(() {
       _volume = v;
       _muted = v == 0;
@@ -605,10 +726,10 @@ class _PlayerPageState extends State<PlayerPage> {
 
   void _toggleMute() {
     if (_muted || _volume == 0) {
-      _player.setVolume(_volume == 0 ? 100 : _volume);
+      _cmdVolume(_volume == 0 ? 100 : _volume);
       setState(() => _muted = false);
     } else {
-      _player.setVolume(0);
+      _cmdVolume(0);
       setState(() => _muted = true);
     }
     _poke();
@@ -776,11 +897,7 @@ class _PlayerPageState extends State<PlayerPage> {
                     behavior: HitTestBehavior.opaque,
                     child: ColoredBox(
                       color: Colors.black,
-                      child: Video(
-                        controller: _controller,
-                        controls: NoVideoControls,
-                        fit: BoxFit.contain,
-                      ),
+                      child: _videoSurface(),
                     ),
                   ),
                 ),
@@ -811,8 +928,8 @@ class _PlayerPageState extends State<PlayerPage> {
                 ),
                 if (_statsVisible)
                   _StatsOverlay(
-                    width: _player.state.width,
-                    height: _player.state.height,
+                    width: _pictureWidth,
+                    height: _pictureHeight,
                     hwdec: _hwdec,
                     codec: _codec,
                     droppedDecoder: _droppedDecoder,
@@ -835,6 +952,17 @@ class _PlayerPageState extends State<PlayerPage> {
           ),
         ),
       ),
+    );
+  }
+
+  /// The picture. Both engines letterbox to fit, so this is the only place in
+  /// the page that knows which one is playing.
+  Widget _videoSurface() {
+    if (_exo != null) return const ExoVideo();
+    return Video(
+      controller: _mpvController!,
+      controls: NoVideoControls,
+      fit: BoxFit.contain,
     );
   }
 
@@ -885,11 +1013,13 @@ class _PlayerPageState extends State<PlayerPage> {
             tracks: _tracks,
             active: _activeTrack,
             onAudio: (t) {
-              _player.setAudioTrack(t);
+              _exo?.setAudioTrack(t);
+              _mpv?.setAudioTrack(t);
               _poke();
             },
             onSubtitle: (t) {
-              _player.setSubtitleTrack(t);
+              _exo?.setSubtitleTrack(t);
+              _mpv?.setSubtitleTrack(t);
               _poke();
             },
           ),
@@ -906,7 +1036,7 @@ class _PlayerPageState extends State<PlayerPage> {
           canZap: _app.zapListFor(_item).length > 1,
           onTogglePlay: _togglePlay,
           onSeek: (d) {
-            _player.seek(d);
+            _cmdSeek(d);
             _poke();
           },
           onVolume: _setVolume,

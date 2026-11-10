@@ -30,8 +30,17 @@ class MainActivity : FlutterActivity() {
         const val NOTIFICATION_REQUEST = 7311
     }
 
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // The ExoPlayer engine: a second way to play, for devices where
+        // libmpv's path to the screen is too expensive.
+        ExoPlayback.register(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            ExoPlayback.VIEW_TYPE,
+            ExoPlayback.viewFactory(),
+        )
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
