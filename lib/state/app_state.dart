@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../data/download_manager.dart';
 import '../data/local_store.dart';
 import '../data/models.dart';
+import '../data/playback_diagnosis.dart';
 import '../data/repository.dart';
 import '../data/update_service.dart';
 
@@ -577,6 +578,34 @@ class AppState extends ChangeNotifier {
       password,
       userAgent ?? _settings.userAgent,
     );
+  }
+
+  /// Asks the provider why a stream would not play.
+  ///
+  /// Worth the extra request when playback fails: the usual answer is one the
+  /// stream itself cannot give. Returns null when the account is fine and the
+  /// failure deserves a retry instead of a message.
+  Future<String?> explainPlaybackFailure() async {
+    final source = _current;
+    if (source == null || source.kind != SourceKind.xtream) return null;
+    final host = source.host;
+    final username = source.username;
+    final password = source.password;
+    if (host == null || username == null || password == null) return null;
+
+    try {
+      final account = await _repository.verifyXtream(
+        host,
+        username,
+        password,
+        source.userAgent ?? _settings.userAgent,
+      );
+      return PlaybackDiagnosis.forAccount(account);
+    } catch (_) {
+      // The panel is unreachable or refused the login. The player's own
+      // message is no worse than a guess here.
+      return null;
+    }
   }
 
   // --- Queries -------------------------------------------------------------

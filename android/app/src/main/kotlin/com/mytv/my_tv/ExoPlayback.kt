@@ -134,6 +134,15 @@ object ExoPlayback {
                 result.success(null)
             }
 
+            // Lets go of the stream outright. A pause keeps the connection to
+            // the provider open, which on a one-connection account is enough
+            // to refuse every other device.
+            "stop" -> {
+                player?.stop()
+                player?.clearMediaItems()
+                result.success(null)
+            }
+
             "seek" -> {
                 val ms = (call.argument<Int>("positionMs") ?: 0).toLong()
                 player?.seekTo(ms)

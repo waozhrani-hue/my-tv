@@ -123,6 +123,23 @@ class SettingsPage extends StatelessWidget {
                     ),
                   ],
                   const Divider(),
+                  SwitchListTile(
+                    title: const Text('Free the connection when I leave'),
+                    subtitle: Text(
+                      'Most subscriptions allow only one or two devices at '
+                      'once, counted across all of them. Left on, closing or '
+                      'leaving this app stops the stream and hands the '
+                      'connection back, so the TV or the car screen can play. '
+                      'Turn it off only if your provider allows plenty of '
+                      'connections.',
+                      style: _subtitleStyle,
+                    ),
+                    value: settings.releaseOnBackground,
+                    onChanged: (v) => state.updateSettings(
+                      settings.copyWith(releaseOnBackground: v),
+                    ),
+                  ),
+                  const Divider(),
                   ListTile(
                     title: const Text('Playback performance'),
                     subtitle: Text(

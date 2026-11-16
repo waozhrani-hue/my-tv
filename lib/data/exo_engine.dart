@@ -96,6 +96,10 @@ class ExoEngine {
 
   Future<void> playOrPause() => _methods.invokeMethod<void>('playOrPause');
 
+  /// Stops and lets go of the stream, closing the connection to the provider.
+  /// Pausing is not enough for that — the socket stays open.
+  Future<void> stop() => _methods.invokeMethod<void>('stop');
+
   Future<void> seek(Duration position) => _methods.invokeMethod<void>('seek', {
     'positionMs': position.inMilliseconds,
   });

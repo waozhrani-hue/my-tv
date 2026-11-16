@@ -336,6 +336,7 @@ class Settings {
     this.playbackProfile = PlaybackProfile.balanced,
     this.videoOutput = VideoOutput.auto,
     this.playerEngine = PlayerEngine.mpv,
+    this.releaseOnBackground = true,
   });
 
   /// Offered in the settings screen for the double-tap skip.
@@ -382,6 +383,15 @@ class Settings {
   /// Which player decodes and draws. Android only; Windows is always mpv.
   final PlayerEngine playerEngine;
 
+  /// Whether leaving the app stops the stream and hands the provider's
+  /// connection back.
+  ///
+  /// On by default, because most IPTV accounts allow one or two simultaneous
+  /// connections and they are counted across every device. An app left open
+  /// in the background holds one, which is enough to refuse every other
+  /// screen on the account.
+  final bool releaseOnBackground;
+
   /// Bytes to allow the demuxer, derived from the readahead at a generous
   /// 6 Mbps and capped at 512 MB. Without raising this, the seconds target is
   /// ignored — mpv stops reading when either limit is reached.
@@ -411,6 +421,7 @@ class Settings {
     PlaybackProfile? playbackProfile,
     VideoOutput? videoOutput,
     PlayerEngine? playerEngine,
+    bool? releaseOnBackground,
   }) {
     return Settings(
       liveContainer: liveContainer ?? this.liveContainer,
@@ -427,6 +438,7 @@ class Settings {
       playbackProfile: playbackProfile ?? this.playbackProfile,
       videoOutput: videoOutput ?? this.videoOutput,
       playerEngine: playerEngine ?? this.playerEngine,
+      releaseOnBackground: releaseOnBackground ?? this.releaseOnBackground,
     );
   }
 
@@ -445,6 +457,7 @@ class Settings {
     'playbackProfile': playbackProfile.name,
     'videoOutput': videoOutput.name,
     'playerEngine': playerEngine.name,
+    'releaseOnBackground': releaseOnBackground,
   };
 
   static Settings fromJson(Map<String, dynamic> json) {
@@ -480,6 +493,7 @@ class Settings {
         (e) => e.name == json['playerEngine'],
         orElse: () => PlayerEngine.mpv,
       ),
+      releaseOnBackground: json['releaseOnBackground'] as bool? ?? true,
     );
   }
 }

@@ -27,7 +27,7 @@ class PlayerPage extends StatefulWidget {
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage> {
+class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   static const _hideDelay = Duration(milliseconds: 3500);
 
   /// How long the skip indicator stays up. Another double-tap inside this
@@ -145,6 +145,7 @@ class _PlayerPageState extends State<PlayerPage> {
     // A provider that allows one connection at a time gives it to whichever
     // asks first, so a running download would leave nothing to play with.
     _app.downloads.suspendForPlayback();
+    WidgetsBinding.instance.addObserver(this);
 
     _listen();
     _applyNativeOptions(settings);
@@ -461,6 +462,56 @@ class _PlayerPageState extends State<PlayerPage> {
     await _app.noteWatched(item);
   }
 
+  // --- Leaving the app ------------------------------------------------------
+
+  /// Where playback was when the app went to the background, if the stream was
+  /// handed back. Null means nothing to restore.
+  Duration? _releasedAt;
+  var _released = false;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Only a real background counts. `inactive` and `hidden` arrive for a
+    // notification shade or an unfocused desktop window, where stopping
+    // playback would be wrong.
+    if (state == AppLifecycleState.paused) {
+      _releaseConnection();
+    } else if (state == AppLifecycleState.resumed) {
+      _restoreConnection();
+    }
+  }
+
+  /// Hands the provider's connection back when the app is left.
+  ///
+  /// Pausing does not do this: the socket stays open and the account stays at
+  /// its limit, which on a one-connection subscription refuses every other
+  /// device — a phone left open in the background is enough to stop the car
+  /// screen and the TV both.
+  Future<void> _releaseConnection() async {
+    if (_released || !_app.settings.releaseOnBackground) return;
+    _released = true;
+    _releasedAt = _isLive ? null : _position;
+    _recordProgress();
+    _retryTimer?.cancel();
+    await _exo?.stop();
+    await _mpv?.stop();
+  }
+
+  Future<void> _restoreConnection() async {
+    if (!_released) return;
+    _released = false;
+    final at = _releasedAt;
+    _releasedAt = null;
+    if (!mounted) return;
+    setState(() {
+      _buffering = true;
+      _error = null;
+      _retries = 0;
+      _reconnecting = false;
+    });
+    await _reopen(resumeAt: at);
+  }
+
   // --- Reconnecting ---------------------------------------------------------
 
   /// A dropped stream is usually the network rather than the channel, so the
@@ -472,6 +523,14 @@ class _PlayerPageState extends State<PlayerPage> {
 
   void _onStreamError(String message) {
     if (!mounted) return;
+    // Nothing is wrong while the app is in the background with the stream
+    // deliberately let go.
+    if (_released) return;
+
+    // Ask the provider in parallel. If the answer is that the account is at
+    // its connection limit or out of date, retrying is pointless and the
+    // message below would hide the only thing worth knowing.
+    _diagnose();
 
     if (_retries >= _maxRetries) {
       setState(() {
@@ -496,6 +555,29 @@ class _PlayerPageState extends State<PlayerPage> {
       // Resume where it dropped rather than from the start of a film.
       _reopen(resumeAt: _isLive ? null : _position);
     });
+  }
+
+  /// Replaces the player's own message when the provider gives a better one.
+  ///
+  /// Only one question is in flight at a time: the retries would otherwise ask
+  /// the panel four times over for the same answer.
+  var _diagnosing = false;
+
+  Future<void> _diagnose() async {
+    if (_diagnosing) return;
+    _diagnosing = true;
+    try {
+      final reason = await _app.explainPlaybackFailure();
+      if (!mounted || reason == null || _released) return;
+      _retryTimer?.cancel();
+      setState(() {
+        _error = reason;
+        _reconnecting = false;
+        _retries = _maxRetries;
+      });
+    } finally {
+      _diagnosing = false;
+    }
   }
 
   /// Reopens the current item, keeping the retry counter so repeated failures
@@ -564,6 +646,7 @@ class _PlayerPageState extends State<PlayerPage> {
       sub.cancel();
     }
     _focus.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     _mpv?.dispose();
     _exo?.dispose();
     _app.downloads.resumeAfterPlayback();
